@@ -1,0 +1,49 @@
+# Build artifacts
+*.o
+*.exe
+*.out
+*.a
+*.so
+*.dll
+*.dylib
+
+# Editor files
+.vscode/
+.vs/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE files
+*.user
+*.suo
+*.ncb
+*.aps
+*.pdb
+*.ilk
+*.obj
+*.idb
+*.pch
+
+# Temporary files
+*.log
+*.tmp
+.cache/
+temp/
+
+# Git
+.git/
+
+shaders_embedded.h
+*.stackdump
+
+# web build dependency (raylib 5.5 source, fetched by `make web-deps`)
+web_deps/
+
+# per-session output (the labelled reference set is kept)
+screenshots/frames_cam*/
+screenshots/warp_*.png
+
+# vendored desktop raylib (GL 4.3 build) is part of the repo
+!lib/libraylib.a
