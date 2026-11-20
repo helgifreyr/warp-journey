@@ -23,9 +23,12 @@
     if (!c.getContext('webgl2')) fail('This needs WebGL2, which this browser or GPU doesn’t offer.<br>Try a current Chrome, Edge, Firefox or Safari.');
   })();
   var canvas = document.getElementById('canvas');
+  // F1 opens the browser's help page; keep it for the in-game help while this tab has focus
+  window.addEventListener('keydown', function (e) { if (e.key === 'F1') e.preventDefault(); }, true);
+  window.addEventListener('help', function (e) { e.preventDefault(); }, true);   // old Edge/IE
   canvas.addEventListener('click', function () { canvas.focus(); });
   canvas.addEventListener('webglcontextlost', function (e) {
-    fail('The GPU gave up on a frame (WebGL context lost).<br>Reload the page, and press F2 to lower the render scale.');
+    fail('The GPU gave up on a frame (WebGL context lost).<br>Reload the page, and press R to lower the render scale.');
     e.preventDefault();
   }, false);
   var Module = {

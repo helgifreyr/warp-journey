@@ -305,8 +305,9 @@ void game_update(Game* g, float dt) {
     if (IsKeyPressed(KEY_B)) g->doppler = !g->doppler;
     if (IsKeyPressed(KEY_G)) g->glow = !g->glow;
     if (IsKeyPressed(KEY_H)) g->hud = !g->hud;
-    if (IsKeyPressed(KEY_F1)) { g->help = !g->help; g->helpTimer = 0; }
-    if (IsKeyPressed(KEY_F2)) {
+    // F1/F2 also have letter keys: Mac keyboards send F-keys as media keys
+    if (IsKeyPressed(KEY_F1) || IsKeyPressed(KEY_SLASH)) { g->help = !g->help; g->helpTimer = 0; }
+    if (IsKeyPressed(KEY_F2) || IsKeyPressed(KEY_R)) {
         g->scaleIdx = (g->scaleIdx + 1) % 4;
         char tt[64];
         snprintf(tt, sizeof tt, "Render scale %d%%", (int)(RENDER_SCALES[g->scaleIdx] * 100));
@@ -437,7 +438,7 @@ static void draw_hud(Game* g) {
     }
     DrawText(TextFormat("cruise %.2f c   bubble R %.1f   wall sharpness %.1f   %d fps",
              g->vMax, g->R, g->sigma, GetFPS()), 22, 108, 14, GRAY);
-    DrawText("F1 help", 22, 126, 12, DARKGRAY);
+    DrawText("F1 or ? help", 22, 126, 12, DARKGRAY);
 
     if (g->help || g->helpTimer > 0) {
         static const char* lines[] = {
@@ -455,10 +456,10 @@ static void draw_hud(Game* g) {
             "B / G        Doppler colour / exotic-matter glow",
 #if defined(PLATFORM_WEB)
             "P            screenshot (no HUD), downloaded as a PNG",
-            "H hide HUD   F2 render scale   F11 fullscreen",
+            "H hide HUD   F2 / R render scale   F11 fullscreen",
 #else
             "P / F12      screenshot (no HUD) -> screenshots/",
-            "H hide HUD   F2 render scale   F5 shaders   F11 fullscreen",
+            "H hide HUD   F2 / R render scale   F5 shaders   F11 fullscreen",
 #endif
         };
         int n = (int)(sizeof lines / sizeof lines[0]);

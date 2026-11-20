@@ -13,7 +13,8 @@ reference for a game that uses the Alcubierre drive for FTL.
 
 **Play it in the browser: https://helgifreyr.github.io/warp-journey/** (Windows, macOS
 or Linux, in a current Chrome, Edge, Firefox or Safari with WebGL2). Click the view
-to capture the mouse. It starts at 50% render scale; F2 changes it.
+to capture the mouse. It starts at 50% render scale; F2 or R changes it. On a Mac keyboard, use ? for help
+and R for render scale, since the F-keys control brightness and volume there.
 
 ```
 make                         # build warp.exe
@@ -48,7 +49,10 @@ that's used instead, so editing a shader and pressing F5 works while developing.
 | B / G | Doppler colour / exotic-matter glow |
 | , . | exposure |
 | P or F12 | screenshot without the HUD, saved to `screenshots/` (browser: P, downloaded) |
-| H, F1, F2, F5, F11 | hide HUD, help, render scale, reload shaders (not in the browser), fullscreen |
+| H | hide HUD |
+| F1 or ? | help |
+| F2 or R | render scale |
+| F5, F11 | reload shaders (not in the browser), fullscreen |
 
 The timeline shows the speed profile, with the light-speed line marked. For an
 observer, it also marks the yellow moments when the light from the departure and
