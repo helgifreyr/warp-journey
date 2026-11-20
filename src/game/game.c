@@ -23,9 +23,14 @@
 #define T_BEFORE   8.0f     // timeline starts this long before departure
 #define T_AFTER    70.0f    // ... and ends this long after arrival
 
-enum { CAM_SHIP = 0, CAM_DEPART = 1, CAM_ARRIVE = 2, CAM_MIDWAY = 3 };
+enum { CAM_SHIP = 0, CAM_DEPART = 1, CAM_ARRIVE = 2, CAM_CHASE = 3 };
 static const char* CAM_NAMES[] = { "ship (inside the bubble)", "observer at departure",
-                                   "observer at arrival", "observer beside the route" };
+                                   "observer at arrival, looking back along the route",
+                                   "chase (outside the bubble)" };
+// Observer presets. The arrival observer sits past the arrival point looking back
+// toward the departure point, so the arrival and the whole route are in view.
+static const Vector3 DEPART_OBS = { -7.0f, 2.5f, 10.0f };
+static const Vector3 ARRIVE_OBS = { 160.0f + 12.0f, 3.0f, 7.0f };
 
 typedef struct {
     const char* name;
@@ -52,6 +57,7 @@ struct Game {
     // cameras
     int cam;                          // CAM_*
     float shipYaw, shipPitch, shipDist;
+    float chaseYaw, chasePitch, chaseDist;
     Vector3 obsPos;
     float obsYaw, obsPitch;
     float fov;
@@ -70,7 +76,10 @@ struct Game {
 // arrival = the moment it stops. Route length = vMax (t_arrive - T_DEPART - T_ACCEL).
 static float t_arrive(const Game* g) { return T_DEPART + PATH_LEN / g->vMax + T_ACCEL; }
 static float t_min(void) { return T_DEPART - T_BEFORE; }
-static float t_max(const Game* g) { return t_arrive(g) + T_AFTER; }
+// Long enough for light from the departure to cross the route to the arrival observer.
+static float t_max(const Game* g) {
+    return fmaxf(t_arrive(g) + T_AFTER, T_DEPART + Vector3Length(ARRIVE_OBS) + 15.0f);
+}
 
 // smootherstep ramp and its integral: exactly as metric_alcubierre.glsl
 static double ramp_S(double u) { return u * u * u * (10.0 + u * (-15.0 + 6.0 * u)); }
@@ -113,8 +122,18 @@ static float ship_cam_max_dist(const Game* g) {   // stay inside the flat interi
     return fmaxf(0.9f, g->R - 2.5f / g->sigma - 0.05f);
 }
 
+// Chase camera: must stay outside the bubble wall (the metric there is not flat).
+static float chase_min_dist(const Game* g) { return g->R + 3.0f / g->sigma + 0.6f; }
+
 static void camera_frame(const Game* g, Vector3* pos, Vector3* fwd, Vector3* right, Vector3* up) {
-    if (g->cam == CAM_SHIP) {
+    if (g->cam == CAM_CHASE) {
+        // Orbits the ship's TRUE position. A stationary observer at that spot sees
+        // whatever light has reached it, so above 1c the ship only shows from behind.
+        Vector3 d = dir_from_angles(g->chaseYaw, g->chasePitch);
+        Vector3 ship = { traj_x(g, g->t), 0, 0 };
+        *pos = Vector3Add(ship, Vector3Scale(d, fmaxf(g->chaseDist, chase_min_dist(g))));
+        *fwd = Vector3Negate(d);
+    } else if (g->cam == CAM_SHIP) {
         Vector3 d = dir_from_angles(g->shipYaw, g->shipPitch);
         Vector3 ship = { traj_x(g, g->t), 0, 0 };
         *pos = Vector3Add(ship, Vector3Scale(d, fminf(g->shipDist, ship_cam_max_dist(g))));
@@ -130,9 +149,8 @@ static void camera_frame(const Game* g, Vector3* pos, Vector3* fwd, Vector3* rig
 static void observer_preset(Game* g, int which) {
     Vector3 target;
     switch (which) {
-    case CAM_DEPART: g->obsPos = (Vector3){ -7.0f, 2.5f, 10.0f };            target = (Vector3){ 2.0f, 0, 0 }; break;
-    case CAM_ARRIVE: g->obsPos = (Vector3){ PATH_LEN + 9.0f, 2.5f, 9.0f };   target = (Vector3){ PATH_LEN - 2.0f, 0, 0 }; break;
-    default:         g->obsPos = (Vector3){ PATH_LEN * 0.5f, 4.0f, 30.0f };  target = (Vector3){ PATH_LEN * 0.5f, 0, 0 }; break;
+    case CAM_DEPART: g->obsPos = DEPART_OBS; target = (Vector3){ 2.0f, 0, 0 }; break;
+    default:         g->obsPos = ARRIVE_OBS; target = (Vector3){ PATH_LEN * 0.55f, 0, 0 }; break;
     }
     angles_from_dir(Vector3Normalize(Vector3Subtract(target, g->obsPos)), &g->obsYaw, &g->obsPitch);
     g->fov = 70.0f;
@@ -141,6 +159,7 @@ static void observer_preset(Game* g, int which) {
 static void select_camera(Game* g, int which) {
     g->cam = which;
     if (which == CAM_SHIP) g->fov = 80.0f;
+    else if (which == CAM_CHASE) g->fov = 70.0f;
     else observer_preset(g, which);
 }
 
@@ -191,6 +210,7 @@ Game* game_create(const char* shader_dir) {
     g->playRate = 4.0f;
     g->playing = true;
     g->shipYaw = -2.45f; g->shipPitch = 0.30f; g->shipDist = 1.6f;   // sunlit side
+    g->chaseYaw = PI + 0.12f; g->chasePitch = 0.12f; g->chaseDist = 7.0f;   // just behind it
     select_camera(g, CAM_SHIP);
     g->doppler = true;
     g->hud = true;
@@ -262,7 +282,7 @@ void game_update(Game* g, float dt) {
     if (IsKeyPressed(KEY_ONE))   select_camera(g, CAM_SHIP);
     if (IsKeyPressed(KEY_TWO))   select_camera(g, CAM_DEPART);
     if (IsKeyPressed(KEY_THREE)) select_camera(g, CAM_ARRIVE);
-    if (IsKeyPressed(KEY_FOUR))  select_camera(g, CAM_MIDWAY);
+    if (IsKeyPressed(KEY_FOUR))  select_camera(g, CAM_CHASE);
 
     Vector2 md = g->mouseCaptured ? GetMouseDelta() : (Vector2){ 0, 0 };
     if (!g->mouseCaptured && !seeking && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) md = GetMouseDelta();
@@ -272,6 +292,10 @@ void game_update(Game* g, float dt) {
         g->shipYaw += md.x * sens;
         g->shipPitch = Clamp(g->shipPitch + md.y * sens, -1.5f, 1.5f);
         g->shipDist = Clamp(g->shipDist * powf(0.9f, wheel), 0.9f, ship_cam_max_dist(g));
+    } else if (g->cam == CAM_CHASE) {
+        g->chaseYaw += md.x * sens;
+        g->chasePitch = Clamp(g->chasePitch + md.y * sens, -1.5f, 1.5f);
+        g->chaseDist = Clamp(g->chaseDist * powf(0.9f, wheel), chase_min_dist(g), 60.0f);
     } else {
         g->obsYaw += md.x * sens;
         g->obsPitch = Clamp(g->obsPitch - md.y * sens, -1.5f, 1.5f);
@@ -406,7 +430,7 @@ static void draw_timeline(Game* g) {
     int n = 0;
     ev[n++] = (TimelineEvent){ T_DEPART, "departs", WHITE };
     ev[n++] = (TimelineEvent){ tb, "arrives", WHITE };
-    if (g->cam != CAM_SHIP) {   // when light from those events reaches this observer
+    if (g->cam == CAM_DEPART || g->cam == CAM_ARRIVE) {   // when light from those events reaches this observer
         float dDep = Vector3Length(g->obsPos);
         float dArr = Vector3Distance(g->obsPos, (Vector3){ PATH_LEN, 0, 0 });
         ev[n++] = (TimelineEvent){ T_DEPART + dDep, "you see it leave", YELLOW };
@@ -430,9 +454,23 @@ static void draw_hud(Game* g) {
     DrawText(TextFormat("%s%s   playback x%.1f%s", phase_name(g, g->t), v >= 1.0f ? " (faster than light)" : "",
              g->playRate, g->playing ? "" : "   [PAUSED]"), 22, 52, 14, RAYWHITE);
     DrawText(TextFormat("camera: %s", CAM_NAMES[g->cam]), 22, 72, 14, LIGHTGRAY);
-    if (g->cam != CAM_SHIP) {
+    if (g->cam == CAM_CHASE) {
+        Vector3 d = dir_from_angles(g->chaseYaw, g->chasePitch);
+        float cone = v > 1.0f ? asinf(1.0f / v) * RAD2DEG : 180.0f;
+        float fromTail = acosf(Clamp(-d.x, -1.0f, 1.0f)) * RAD2DEG;
+        if (v > 1.0f && fromTail > cone)
+            DrawText(TextFormat("faster than light: the ship can't be seen from here. Orbit to within %.0f deg of its tail", cone),
+                     22, 90, 14, (Color){ 255, 170, 120, 255 });
+        else
+            DrawText("a stationary observer at this spot, moved along with the ship", 22, 90, 14, LIGHTGRAY);
+    } else if (g->cam != CAM_SHIP) {
         float d = Vector3Distance(g->obsPos, (Vector3){ traj_x(g, g->t), 0, 0 });
-        DrawText(TextFormat("ship is really %.1f away: its light takes %.1f to get here", d, d), 22, 90, 14, LIGHTGRAY);
+        float tFirst = t_arrive(g) + Vector3Distance(g->obsPos, (Vector3){ PATH_LEN, 0, 0 });
+        if (g->cam == CAM_ARRIVE && g->t < tFirst)
+            DrawText(TextFormat("nothing to see yet: no light from the trip reaches you until t = %.0f", tFirst),
+                     22, 90, 14, (Color){ 255, 220, 120, 255 });
+        else
+            DrawText(TextFormat("ship is really %.1f away: its light takes %.1f to get here", d, d), 22, 90, 14, LIGHTGRAY);
     } else {
         DrawText("inside the bubble: flat, free-falling, no g-forces", 22, 90, 14, LIGHTGRAY);
     }
@@ -447,10 +485,11 @@ static void draw_hud(Game* g) {
             "HOME / END   start / just before arrival",
             "TAB          free the mouse: click the timeline to seek",
             "1            ship camera (orbits inside the bubble)",
-            "2 3 4        observers: departure / arrival / beside route",
-            "mouse        orbit the ship / look around (observers)",
+            "2 3          observers: at departure / at arrival looking back",
+            "4            chase camera outside the bubble",
+            "mouse        orbit the ship (1, 4) / look around (2, 3)",
             "WASD QE      fly the observer (SHIFT faster)",
-            "wheel        ship-cam distance / observer zoom",
+            "wheel        orbit distance (1, 4) / observer zoom (2, 3)",
             "PGUP PGDN    cruise speed      [ ]  bubble size",
             "- =          wall sharpness    , .  exposure",
             "B / G        Doppler colour / exotic-matter glow",
@@ -503,7 +542,7 @@ typedef struct {
     int cam;
     float t;                 // offset from the anchor event
     int anchor;              // 0 departure, 1 arrival, 2/3 = when this observer SEES departure/arrival
-    float yaw, pitch, dist;  // ship camera only
+    float yaw, pitch, dist;  // ship and chase cameras only
     bool glow;
 } Shot;
 
@@ -531,7 +570,11 @@ int game_render_reference_shots(Game* g, const char* out_dir) {
         { "23_arrive_obs_trip_in_reverse",CAM_ARRIVE,  3.0f, 3, 0, 0, 0, false },
         { "24_arrive_obs_ghost_receding", CAM_ARRIVE, 10.0f, 3, 0, 0, 0, false },
         // beside the route: it has already passed by the time you see anything
-        { "30_midway_obs_passed",         CAM_MIDWAY, 60.0f, 0, 0, 0, 0, true  },
+        // chase camera outside the bubble (orbiting the true position)
+        { "30_chase_waiting",             CAM_CHASE,  -4.0f, 0, PI + 0.9f, 0.25f, 7.0f, false },
+        { "31_chase_cruise_behind",       CAM_CHASE,  15.0f, 0, PI + 0.12f, 0.12f, 7.0f, false },
+        { "32_chase_cruise_side_invisible",        CAM_CHASE,  15.0f, 0, PI * 0.5f, 0.15f, 7.0f, false },
+        { "33_chase_decelerating",        CAM_CHASE,  -2.0f, 1, PI + 0.12f, 0.12f, 7.0f, false },
     };
     int n = (int)(sizeof shots / sizeof shots[0]), written = 0;
     if (!DirectoryExists(out_dir)) MakeDirectory(out_dir);
@@ -539,6 +582,7 @@ int game_render_reference_shots(Game* g, const char* out_dir) {
         const Shot* s = &shots[i];
         select_camera(g, s->cam);
         if (s->cam == CAM_SHIP) { g->shipYaw = s->yaw; g->shipPitch = s->pitch; g->shipDist = s->dist; }
+        if (s->cam == CAM_CHASE) { g->chaseYaw = s->yaw; g->chasePitch = s->pitch; g->chaseDist = s->dist; }
         float anchorT = T_DEPART;
         if (s->anchor == 1) anchorT = t_arrive(g);
         if (s->anchor == 2) anchorT = T_DEPART + Vector3Length(g->obsPos);

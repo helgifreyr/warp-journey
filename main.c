@@ -9,7 +9,7 @@
  *   warp.exe --shots            render reference images to screenshots/reference
  *   warp.exe --frames CAM [DT]  render the whole timeline as a PNG sequence from
  *                               camera CAM (1 ship, 2 departure, 3 arrival,
- *                               4 midway), one frame every DT time units (0.25)
+ *                               4 chase), one frame every DT time units (0.25)
  */
 #include "raylib.h"
 #include "src/game/game.h"
@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
         frameCam = atoi(argv[2]);
         if (argc > 3) frameDt = (float)atof(argv[3]);
         if (frameCam < 1 || frameCam > 4 || frameDt <= 0.0f) {
-            printf("usage: warp --frames CAM [DT]   CAM 1 ship, 2 departure, 3 arrival, 4 midway\n");
+            printf("usage: warp --frames CAM [DT]   CAM 1 ship, 2 departure, 3 arrival, 4 chase\n");
             return 1;
         }
         shots = true;   // same hidden-window setup

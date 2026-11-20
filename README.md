@@ -42,8 +42,9 @@ that's used instead, so editing a shader and pressing F5 works while developing.
 | HOME / END | start / just before arrival |
 | TAB | free the mouse, then click or drag on the timeline to seek |
 | 1 | ship camera: mouse orbits the ship inside the bubble, wheel sets distance |
-| 2 / 3 / 4 | observer at departure / at arrival / beside the route |
-| mouse, WASD, QE | observers: look, fly, up/down (SHIFT faster), wheel zooms |
+| 2 / 3 | observer at departure / observer past the arrival point, looking back along the route |
+| 4 | chase camera outside the bubble: mouse orbits the ship, wheel sets distance |
+| mouse, WASD, QE | observers (2, 3): look, fly, up/down (SHIFT faster), wheel zooms |
 | PGUP / PGDN | cruise speed (the route length stays fixed, so the trip gets shorter) |
 | [ ] and - = | bubble size and wall sharpness |
 | B / G | Doppler colour / exotic-matter glow |
@@ -73,19 +74,31 @@ reaches the observer (the yellow marker). Then the bubble visibly forms, stretch
 and shrinks away into the distance. This observer is behind it, so the departing
 bubble stays visible as a receding image long after it has really gone.
 
-**Watching it arrive (camera 3).** This is the strange one:
+**Watching it arrive (camera 3).** The observer is just past the arrival point,
+looking back down the route toward the departure point. This is the strange one:
 - The ship arrives long before you see anything. It's already sitting there while
-  the view is empty.
+  the view is empty. The HUD says when the first light will get there.
 - When the light does arrive, there's a brief blueshifted spark: light that piled up
   on the bubble's front wall during the trip is released when it stops.
 - The ship appears in place, and at the same time a dark, redshifted "ghost" peels
   away from it and drifts back along the route. You are watching the trip in
   reverse, because light from the faster-than-light leg arrives after the ship
   and in reverse order.
+- The ghost shrinks away toward the departure point, 160 units off. That reversed
+  trip is how this observer sees it leave. The departure itself is
+  only a few pixels at that distance (wheel zooms in), and its light takes 172
+  time units to get here, so the timeline runs long enough to include it.
 
-**Beside the route (camera 4).** A faster-than-light bubble can't be seen coming.
-By the time any light reaches you it has already passed, and what you see is the
-receding image.
+**Chasing it (camera 4).** The camera is kept at a fixed offset from the ship's
+true position, outside the bubble, and the mouse orbits it. No observer can really
+keep up outside the bubble, so each frame shows what a stationary observer at
+that spot would see at that moment.
+- At rest and below light speed you see the ship and bubble from any side.
+- Above light speed the ship is visible only from within a cone behind it
+  (14° at 4c), because light can't get out ahead of the bubble. The HUD warns when
+  you've orbited outside the cone.
+- From behind it looks much closer and bigger than it really is, and reddened.
+  You're seeing light that left it a moment ago, when it was nearer.
 
 **The glow (G) is not light.** It shows where the exotic (negative) energy sits:
 a band around the bubble's middle, perpendicular to travel. Its brightness is
@@ -94,7 +107,7 @@ normalised so it reads at any speed.
 **Wall sharpness matters for the look.** Sharp walls (= key) give crisp lensing
 rings. Soft walls (- key) give a heat-haze smear.
 
-`screenshots/reference/` has 19 labelled stills covering all of this. The observer
+`screenshots/reference/` has 22 labelled stills covering all of this. The observer
 shots are timed relative to when each event's light reaches that observer.
 
 ### Simplifications
