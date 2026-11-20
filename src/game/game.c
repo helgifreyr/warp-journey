@@ -64,7 +64,7 @@ struct Game {
     float fov;
 
     // look
-    bool doppler, glow, hud, help, mouseCaptured;
+    bool doppler, glow, hud, help, info, mouseCaptured;
     float exposure;
     int scaleIdx;
 
@@ -275,6 +275,7 @@ Game* game_create(const char* shader_dir) {
     select_camera(g, CAM_SHIP);
     g->doppler = true;
     g->hud = true;
+    g->info = true;
     g->exposure = 1.0f;
     g->helpTimer = 12.0f;
     g->mouseCaptured = true;
@@ -394,6 +395,7 @@ void game_update(Game* g, float dt) {
     if (IsKeyPressed(KEY_B)) g->doppler = !g->doppler;
     if (IsKeyPressed(KEY_G)) g->glow = !g->glow;
     if (IsKeyPressed(KEY_H)) g->hud = !g->hud;
+    if (IsKeyPressed(KEY_I)) g->info = !g->info;
     // F1/F2 also have letter keys: Mac keyboards send F-keys as media keys
     if (IsKeyPressed(KEY_F1) || IsKeyPressed(KEY_SLASH)) { g->help = !g->help; g->helpTimer = 0; }
     if (IsKeyPressed(KEY_F2) || IsKeyPressed(KEY_R)) {
@@ -510,6 +512,142 @@ static void draw_timeline(Game* g) {
     DrawRectangle(cx - 2, (int)r.y - 4, 4, (int)r.height + 8, RAYWHITE);
 }
 
+// ---- info box: what this camera is and what you are seeing right now -----------------
+// Word-wraps `text` ('\n' starts a new paragraph) into `width`; returns the height used.
+static int wrap_text(const char* text, int x, int y, int width, int fs, int lh, Color c, bool draw) {
+    char line[640] = "", word[128];
+    int h = 0;
+    const char* p = text;
+    while (*p) {
+        int n = 0;
+        while (p[n] && p[n] != ' ' && p[n] != '\n' && n < 127) n++;
+        memcpy(word, p, (size_t)n); word[n] = '\0';
+        char trial[640];
+        snprintf(trial, sizeof trial, "%s%s%s", line, line[0] ? " " : "", word);
+        if (line[0] && MeasureText(trial, fs) > width) {
+            if (draw) DrawText(line, x, y + h, fs, c);
+            h += lh;
+            snprintf(line, sizeof line, "%s", word);
+        } else {
+            snprintf(line, sizeof line, "%s", trial);
+        }
+        p += n;
+        if (*p == ' ') p++;
+        else if (*p == '\n') {
+            if (draw && line[0]) DrawText(line, x, y + h, fs, c);
+            h += lh + lh / 3;
+            line[0] = '\0';
+            p++;
+        }
+    }
+    if (line[0]) { if (draw) DrawText(line, x, y + h, fs, c); h += lh; }
+    return h;
+}
+
+static void info_text(const Game* g, const char** title, char* out, size_t cap) {
+    float t = g->t, v = traj_v(g, t), tb = t_arrive(g);
+    float cone = v > 1.0f ? asinf(1.0f / v) * RAD2DEG : 90.0f;
+    switch (g->cam) {
+    case CAM_SHIP:
+        *title = "Riding along inside the bubble";
+        snprintf(out, cap, "The camera floats in the flat region inside the bubble, beside the ship. Only the space "
+                 "around the bubble is warped: inside, nobody feels any acceleration.\n%s",
+                 t <= T_DEPART ? "Waiting to depart. Spacetime is still flat, so the sky looks normal." :
+                 t >= tb ? "Arrived. The bubble has switched off and the sky is back to normal." :
+                 v < 1.0f ? "Below light speed. Stars ahead crowd toward the nose and turn blue; stars behind "
+                            "spread out and turn red. Orbit with the mouse to look around." :
+                            "Faster than light. Look back: black, because light from behind can't catch the bubble. "
+                            "Look ahead: the sky is squeezed into a bright blue patch. Look sideways: the sky splits "
+                            "into a blue half and a black half.");
+        break;
+    case CAM_DEPART: {
+        float dNow = Vector3Distance(g->obsPos, (Vector3){ traj_x(g, t), 0, 0 });
+        float tSee = T_DEPART + Vector3Length(g->obsPos);
+        *title = "Watching it leave (observer at the departure point)";
+        if (t < T_DEPART)
+            snprintf(out, cap, "You're standing still near the departure point. The ship waits in its bubble %.0f away; "
+                     "its light takes %.0f to reach you, so what you see is (nearly) where it is.", dNow, dNow);
+        else if (t < tSee)
+            snprintf(out, cap, "The ship has already set off, but light from the departure hasn't reached you yet, so you "
+                     "still see it sitting there. That changes at t = %.0f (the yellow marker).", tSee);
+        else
+            snprintf(out, cap, "You see the bubble form and pull away. You're behind it, so its light keeps reaching you: "
+                     "the shrinking, reddening image shows where it was long ago.\nIt is really %.0f away now%s.",
+                     dNow, t >= tb ? ", and has already arrived" : "");
+        break;
+    }
+    case CAM_ARRIVE: {
+        float dArr = Vector3Distance(g->obsPos, (Vector3){ PATH_LEN, 0, 0 });
+        float tFirst = tb + dArr, tDep = T_DEPART + Vector3Length(g->obsPos);
+        *title = "Watching it arrive (observer looking back down the route)";
+        if (t < tb)
+            snprintf(out, cap, "Nothing to see. The ship is on its way, but faster than light it is ahead of its own light, "
+                     "so you can't see it coming.\nIt stops at the arrival point (%.0f from you) at t = %.0f.", dArr, tb);
+        else if (t < tFirst)
+            snprintf(out, cap, "Still nothing, but the ship is already here, %.0f from you. Its light gets here at t = %.0f "
+                     "(the yellow marker).", dArr, tFirst);
+        else if (t < tFirst + 3.0f)
+            snprintf(out, cap, "The arrival. The flash is light that piled up on the front of the bubble during the trip, "
+                     "released when it stopped.");
+        else if (t < tDep)
+            snprintf(out, cap, "The bubble moving away is the trip played BACKWARDS. Light from earlier in the trip had "
+                     "further to travel, so it gets here later. The ship that stays put is the real one; the dark red "
+                     "bubble is an image of where it was.\nThe replay reaches the departure point at t = %.0f.", tDep);
+        else
+            snprintf(out, cap, "Light from the departure itself has now arrived: the backwards replay has run all the way "
+                     "back to the start. You have seen the whole trip, in reverse.");
+        break;
+    }
+    default: {
+        Vector3 d = chase_dir(g);
+        float fromTail = acosf(Clamp(-d.x, -1.0f, 1.0f)) * RAD2DEG;
+        const char* now;
+        char buf[400];
+        if (v <= 0.0f)
+            now = "At rest, the image and the real ship are in the same place.";
+        else if (!g->chaseFrame && v > 1.0f && fromTail > cone) {
+            snprintf(buf, sizeof buf, "From here the ship is invisible: no light gets out ahead of a faster-than-light "
+                     "bubble. Orbit to within %.0f deg of its tail, or press V.", cone);
+            now = buf;
+        } else if (!g->chaseFrame)
+            now = "The camera keeps a fixed offset from the REAL position, so the image drifts back and can leave the "
+                  "view as it speeds up. V keeps it framed.";
+        else if (v < 1.0f)
+            now = "Moving: the image lags behind the real ship. The camera aims at the image and backs off so it "
+                  "stays the same size (V turns this off).";
+        else {
+            snprintf(buf, sizeof buf, "Faster than light: no light gets out ahead of the bubble, so the ship is only "
+                     "visible from within %.0f deg of its tail; the camera stays in that cone. It looks bigger than at "
+                     "rest because the bubble wall acts like a magnifying lens.", cone);
+            now = buf;
+        }
+        *title = "Chase camera (outside the bubble)";
+        snprintf(out, cap, "Nothing can keep pace with the bubble outside it, so each frame shows what someone standing "
+                 "still at the camera's spot would see. That light left the ship a moment earlier: you see where it "
+                 "was, not where it is.\n%s", now);
+        break;
+    }
+    }
+}
+
+static void draw_info(const Game* g) {
+    int sw = GetScreenWidth();
+    const char* title = "";
+    char body[1400];
+    info_text(g, &title, body, sizeof body);
+    int bw = (int)fminf(460.0f, sw * 0.45f), pad = 12, fs = 15, lh = 19;
+    int th = wrap_text(title, 0, 0, bw - 2 * pad, 17, 21, WHITE, false);
+    int bh = th + 6 + wrap_text(body, 0, 0, bw - 2 * pad, fs, lh, WHITE, false) + 2 * pad;
+    int bx = sw - bw - 10, by = (int)timeline_rect().y - 62 - bh;
+    if (by < 10) by = 10;
+    if ((g->help || g->helpTimer > 0) && by < 400) return;   // would collide with the help panel
+    DrawRectangle(bx, by, bw, bh, Fade(BLACK, 0.6f));
+    DrawRectangle(bx, by, 3, bh, (Color){ 140, 210, 255, 255 });
+    wrap_text(title, bx + pad, by + pad, bw - 2 * pad, 17, 21, (Color){ 140, 210, 255, 255 }, true);
+    wrap_text(body, bx + pad, by + pad + th + 6, bw - 2 * pad, fs, lh, RAYWHITE, true);
+    DrawText("I hides this", bx + bw - pad - MeasureText("I hides this", 10), by + bh - 14, 10, GRAY);
+}
+
 static void draw_hud(Game* g) {
     int sw = GetScreenWidth();
     float v = traj_v(g, g->t);
@@ -536,12 +674,8 @@ static void draw_hud(Game* g) {
     } else if (g->cam != CAM_SHIP) {
         float d = Vector3Distance(g->obsPos, (Vector3){ traj_x(g, g->t), 0, 0 });
         float tFirst = t_arrive(g) + Vector3Distance(g->obsPos, (Vector3){ PATH_LEN, 0, 0 });
-        float tDep = T_DEPART + Vector3Length(g->obsPos);
         if (g->cam == CAM_ARRIVE && g->t < tFirst)
             DrawText(TextFormat("nothing to see yet: no light from the trip reaches you until t = %.0f", tFirst),
-                     22, 90, 14, (Color){ 255, 220, 120, 255 });
-        else if (g->cam == CAM_ARRIVE && g->t < tDep)
-            DrawText("the bubble moving away is the trip played BACKWARDS: later light came first. The ship that stays is the real one",
                      22, 90, 14, (Color){ 255, 220, 120, 255 });
         else
             DrawText(TextFormat("ship is really %.1f away: its light takes %.1f to get here", d, d), 22, 90, 14, LIGHTGRAY);
@@ -567,6 +701,7 @@ static void draw_hud(Game* g) {
             "PGUP PGDN    cruise speed      [ ]  bubble size",
             "- =          wall sharpness    , .  exposure",
             "B / G        Doppler colour / exotic-matter glow",
+            "I            info box: what this camera is showing",
 #if defined(PLATFORM_WEB)
             "P            screenshot (no HUD), downloaded as a PNG",
             "H hide HUD   F2 / R render scale   F11 fullscreen",
@@ -580,6 +715,7 @@ static void draw_hud(Game* g) {
         DrawRectangle(bx, by, bw, bh, Fade(BLACK, 0.6f));
         for (int i = 0; i < n; i++) DrawText(lines[i], bx + 12, by + 10 + i * 20, 15, RAYWHITE);
     }
+    if (g->info) draw_info(g);
     draw_timeline(g);
     if (g->msgTimer > 0) {
         int w = MeasureText(g->msg, 18);
