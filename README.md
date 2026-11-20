@@ -43,7 +43,7 @@ that's used instead, so editing a shader and pressing F5 works while developing.
 | TAB | free the mouse, then click or drag on the timeline to seek |
 | 1 | ship camera: mouse orbits the ship inside the bubble, wheel sets distance |
 | 2 / 3 | observer at departure / observer past the arrival point, looking back along the route |
-| 4 | chase camera outside the bubble: mouse orbits the ship, wheel sets distance |
+| 4 | chase camera outside the bubble: mouse orbits the ship, wheel sets distance, V toggles keep-it-framed |
 | mouse, WASD, QE | observers (2, 3): look, fly, up/down (SHIFT faster), wheel zooms |
 | PGUP / PGDN | cruise speed (the route length stays fixed, so the trip gets shorter) |
 | [ ] and - = | bubble size and wall sharpness |
@@ -80,8 +80,8 @@ looking back down the route toward the departure point. This is the strange one:
   the view is empty. The HUD says when the first light will get there.
 - When the light does arrive, there's a brief blueshifted spark: light that piled up
   on the bubble's front wall during the trip is released when it stops.
-- The ship appears in place, and at the same time a dark, redshifted "ghost" peels
-  away from it and drifts back along the route. You are watching the trip in
+- The ship appears in place, and at the same time a dark, redshifted "ghost" bubble
+  peels away from it and drifts back along the route, leaving the ship behind. You are watching the trip in
   reverse, because light from the faster-than-light leg arrives after the ship
   and in reverse order.
 - The ghost shrinks away toward the departure point, 160 units off. That reversed
@@ -89,14 +89,20 @@ looking back down the route toward the departure point. This is the strange one:
   only a few pixels at that distance (wheel zooms in), and its light takes 172
   time units to get here, so the timeline runs long enough to include it.
 
-**Chasing it (camera 4).** The camera is kept at a fixed offset from the ship's
-true position, outside the bubble, and the mouse orbits it. No observer can really
-keep up outside the bubble, so each frame shows what a stationary observer at
-that spot would see at that moment.
+**Chasing it (camera 4).** The camera orbits the ship from outside the bubble. No
+observer can really keep up outside the bubble, so each frame shows what a
+stationary observer at that spot would see at that moment. That light left the
+ship a little earlier, so the ship's image lags behind its true position.
+- By default (V toggles it) the camera aims at the image rather than the true
+  position. It backs off so the image stays at the wheel distance. Above light
+  speed it stays inside the cone where the ship can be seen at all. Without it,
+  the ship seems to slide backwards out of view as it speeds up.
 - At rest and below light speed you see the ship and bubble from any side.
 - Above light speed the ship is visible only from within a cone behind it
-  (14° at 4c), because light can't get out ahead of the bubble. The HUD warns when
-  you've orbited outside the cone.
+  (14° at 4c), because light can't get out ahead of the bubble. With framing off,
+  the HUD warns when you've orbited outside the cone.
+- The ship looks bigger in cruise than at rest, even at the same image distance,
+  because the bubble wall acts as a magnifying lens.
 - From behind it looks much closer and bigger than it really is, and reddened.
   You're seeing light that left it a moment ago, when it was nearer.
 

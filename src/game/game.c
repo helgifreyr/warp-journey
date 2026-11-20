@@ -58,6 +58,7 @@ struct Game {
     int cam;                          // CAM_*
     float shipYaw, shipPitch, shipDist;
     float chaseYaw, chasePitch, chaseDist;
+    bool chaseFrame;                  // chase cam keeps the ship's IMAGE framed (V toggles)
     Vector3 obsPos;
     float obsYaw, obsPitch;
     float fov;
@@ -125,14 +126,73 @@ static float ship_cam_max_dist(const Game* g) {   // stay inside the flat interi
 // Chase camera: must stay outside the bubble wall (the metric there is not flat).
 static float chase_min_dist(const Game* g) { return g->R + 3.0f / g->sigma + 0.6f; }
 
+// The chase camera is a stationary observer placed relative to the ship's TRUE
+// position, so it sees light that left the ship earlier: the image lags behind
+// (toward a camera behind it) and looks closer. Above 1c no light gets out ahead,
+// so the ship is visible only within asin(1/v) of its tail.
+
+// Where the ship APPEARS from `cam` at time t: the latest emission time te with
+// t - te = |cam - X(te)| (straight light paths; ignores the bubble's own lensing).
+static bool apparent_ship(const Game* g, Vector3 cam, float t, Vector3* img) {
+    float hi = t, fhi = -Vector3Distance(cam, (Vector3){ traj_x(g, t), 0, 0 });
+    for (int i = 0; i < 1600; i++) {
+        float lo = hi - 0.25f;
+        float flo = (t - lo) - Vector3Distance(cam, (Vector3){ traj_x(g, lo), 0, 0 });
+        if (flo >= 0.0f) {
+            for (int k = 0; k < 30; k++) {          // bisect [lo, hi]
+                float m = 0.5f * (lo + hi);
+                float fm = (t - m) - Vector3Distance(cam, (Vector3){ traj_x(g, m), 0, 0 });
+                if (fm >= 0.0f) lo = m; else hi = m;
+            }
+            *img = (Vector3){ traj_x(g, 0.5f * (lo + hi)), 0, 0 };
+            return true;
+        }
+        hi = lo; fhi = flo;
+    }
+    (void)fhi;
+    return false;
+}
+
+// Orbit direction actually used. With framing on, above 1c it is squeezed into
+// the cone behind the ship from which the ship can be seen at all.
+static Vector3 chase_dir(const Game* g) {
+    Vector3 d = dir_from_angles(g->chaseYaw, g->chasePitch);
+    float v = traj_v(g, g->t);
+    if (!g->chaseFrame || v <= 1.0f) return d;
+    float thMax = 0.8f * asinf(1.0f / v);
+    Vector3 tail = { -1, 0, 0 };
+    float th = acosf(Clamp(Vector3DotProduct(d, tail), -1.0f, 1.0f));
+    if (th <= thMax) return d;
+    Vector3 perp = Vector3Subtract(d, Vector3Scale(tail, Vector3DotProduct(d, tail)));
+    perp = Vector3Length(perp) > 1e-4f ? Vector3Normalize(perp) : (Vector3){ 0, 1, 0 };
+    return Vector3Add(Vector3Scale(tail, cosf(thMax)), Vector3Scale(perp, sinf(thMax)));
+}
+
 static void camera_frame(const Game* g, Vector3* pos, Vector3* fwd, Vector3* right, Vector3* up) {
     if (g->cam == CAM_CHASE) {
-        // Orbits the ship's TRUE position. A stationary observer at that spot sees
-        // whatever light has reached it, so above 1c the ship only shows from behind.
-        Vector3 d = dir_from_angles(g->chaseYaw, g->chasePitch);
+        Vector3 d = chase_dir(g);
         Vector3 ship = { traj_x(g, g->t), 0, 0 };
-        *pos = Vector3Add(ship, Vector3Scale(d, fmaxf(g->chaseDist, chase_min_dist(g))));
+        float want = fmaxf(g->chaseDist, chase_min_dist(g));
+        float dist = want;
+        Vector3 img = ship;
+        bool seen = false;
+        if (g->chaseFrame) {
+            // Back off until the IMAGE is `want` away (from behind at constant v that
+            // is want*(1+v); a few fixed-point steps also cover speed-up and slow-down).
+            dist = want * (1.0f + traj_v(g, g->t));
+            for (int it = 0; it < 6; it++) {
+                Vector3 c = Vector3Add(ship, Vector3Scale(d, dist));
+                if (!apparent_ship(g, c, g->t, &img)) break;
+                seen = true;
+                float a = Vector3Distance(img, c);
+                if (a < 0.1f) break;
+                dist = Clamp(dist * want / a, chase_min_dist(g), 400.0f);
+            }
+        }
+        *pos = Vector3Add(ship, Vector3Scale(d, dist));
         *fwd = Vector3Negate(d);
+        if (seen && apparent_ship(g, *pos, g->t, &img) && Vector3Distance(img, *pos) > 0.5f)
+            *fwd = Vector3Normalize(Vector3Subtract(img, *pos));   // aim at what you'd see
     } else if (g->cam == CAM_SHIP) {
         Vector3 d = dir_from_angles(g->shipYaw, g->shipPitch);
         Vector3 ship = { traj_x(g, g->t), 0, 0 };
@@ -210,7 +270,8 @@ Game* game_create(const char* shader_dir) {
     g->playRate = 4.0f;
     g->playing = true;
     g->shipYaw = -2.45f; g->shipPitch = 0.30f; g->shipDist = 1.6f;   // sunlit side
-    g->chaseYaw = PI + 0.12f; g->chasePitch = 0.12f; g->chaseDist = 7.0f;   // just behind it
+    g->chaseYaw = PI + 0.12f; g->chasePitch = 0.12f; g->chaseDist = 5.0f;   // just behind it
+    g->chaseFrame = true;
     select_camera(g, CAM_SHIP);
     g->doppler = true;
     g->hud = true;
@@ -296,6 +357,10 @@ void game_update(Game* g, float dt) {
         g->chaseYaw += md.x * sens;
         g->chasePitch = Clamp(g->chasePitch + md.y * sens, -1.5f, 1.5f);
         g->chaseDist = Clamp(g->chaseDist * powf(0.9f, wheel), chase_min_dist(g), 60.0f);
+        if (IsKeyPressed(KEY_V)) {
+            g->chaseFrame = !g->chaseFrame;
+            toast(g, g->chaseFrame ? "Chase: keep the ship's image in view" : "Chase: fixed offset from the true position (the image can drift away)");
+        }
     } else {
         g->obsYaw += md.x * sens;
         g->obsPitch = Clamp(g->obsPitch - md.y * sens, -1.5f, 1.5f);
@@ -455,19 +520,28 @@ static void draw_hud(Game* g) {
              g->playRate, g->playing ? "" : "   [PAUSED]"), 22, 52, 14, RAYWHITE);
     DrawText(TextFormat("camera: %s", CAM_NAMES[g->cam]), 22, 72, 14, LIGHTGRAY);
     if (g->cam == CAM_CHASE) {
-        Vector3 d = dir_from_angles(g->chaseYaw, g->chasePitch);
+        Vector3 d = chase_dir(g);
         float cone = v > 1.0f ? asinf(1.0f / v) * RAD2DEG : 180.0f;
         float fromTail = acosf(Clamp(-d.x, -1.0f, 1.0f)) * RAD2DEG;
         if (v > 1.0f && fromTail > cone)
             DrawText(TextFormat("faster than light: the ship can't be seen from here. Orbit to within %.0f deg of its tail", cone),
                      22, 90, 14, (Color){ 255, 170, 120, 255 });
+        else if (g->chaseFrame && v > 1.0f)
+            DrawText(TextFormat("above 1c it's only visible within %.0f deg of its tail: camera held in that cone (V)", cone),
+                     22, 90, 14, LIGHTGRAY);
+        else if (g->chaseFrame)
+            DrawText("aimed at where you SEE the ship (light lags behind it): V for fixed offset", 22, 90, 14, LIGHTGRAY);
         else
-            DrawText("a stationary observer at this spot, moved along with the ship", 22, 90, 14, LIGHTGRAY);
+            DrawText("fixed offset from the ship's true position (V to keep it framed)", 22, 90, 14, LIGHTGRAY);
     } else if (g->cam != CAM_SHIP) {
         float d = Vector3Distance(g->obsPos, (Vector3){ traj_x(g, g->t), 0, 0 });
         float tFirst = t_arrive(g) + Vector3Distance(g->obsPos, (Vector3){ PATH_LEN, 0, 0 });
+        float tDep = T_DEPART + Vector3Length(g->obsPos);
         if (g->cam == CAM_ARRIVE && g->t < tFirst)
             DrawText(TextFormat("nothing to see yet: no light from the trip reaches you until t = %.0f", tFirst),
+                     22, 90, 14, (Color){ 255, 220, 120, 255 });
+        else if (g->cam == CAM_ARRIVE && g->t < tDep)
+            DrawText("the bubble moving away is the trip played BACKWARDS: later light came first. The ship that stays is the real one",
                      22, 90, 14, (Color){ 255, 220, 120, 255 });
         else
             DrawText(TextFormat("ship is really %.1f away: its light takes %.1f to get here", d, d), 22, 90, 14, LIGHTGRAY);
@@ -486,7 +560,7 @@ static void draw_hud(Game* g) {
             "TAB          free the mouse: click the timeline to seek",
             "1            ship camera (orbits inside the bubble)",
             "2 3          observers: at departure / at arrival looking back",
-            "4            chase camera outside the bubble",
+            "4            chase camera outside the bubble (V: keep it framed)",
             "mouse        orbit the ship (1, 4) / look around (2, 3)",
             "WASD QE      fly the observer (SHIFT faster)",
             "wheel        orbit distance (1, 4) / observer zoom (2, 3)",
