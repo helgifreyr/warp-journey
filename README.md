@@ -48,6 +48,8 @@ that's used instead, so editing a shader and pressing F5 works while developing.
 | PGUP / PGDN | cruise speed (the route length stays fixed, so the trip gets shorter) |
 | [ ] and - = | bubble size and wall sharpness |
 | B / G | Doppler colour / exotic-matter glow |
+| K | Van Den Broeck pocket on / off (see below) |
+| 9 / 0 | pocket smaller / bigger inside |
 | , . | exposure |
 | P or F12 | screenshot without the HUD, saved to `screenshots/` (browser: P, downloaded) |
 | H | hide HUD |
@@ -114,7 +116,35 @@ normalised so it reads at any speed.
 **Wall sharpness matters for the look.** Sharp walls (= key) give crisp lensing
 rings. Soft walls (- key) give a heat-haze smear.
 
-`screenshots/reference/` has 22 labelled stills covering all of this. The observer
+**Van Den Broeck pocket (K).** In Alcubierre's metric the bubble *is* the motion:
+at rest there is nothing there. Van Den Broeck (Class. Quantum Grav. 16 (1999)
+3973) added a factor B(r) to the space part of the metric:
+
+    ds² = −dt² + B²(r) [ (dx − v f(r) dt)² + dy² + dz² ]
+
+B = 1 + α inside radius R̃, falls to 1 across a shell of thickness Δ̃ (his eq. 12,
+B = α(−(n−1)wⁿ + n wⁿ⁻¹) + 1 with w = (R̃ + Δ̃ − r)/Δ̃ and n = 80), and is 1
+outside. The pocket sits in the flat middle of the Alcubierre bubble. Inside, space
+is flat but 1 + α times bigger than it looks from outside, so a big ship fits in a
+small bubble. That is his point: the bubble wall can be tiny and the negative
+energy it needs drops enormously. B doesn't depend on speed, so the pocket exists,
+and needs energy, while parked. Implementation notes:
+- The metric, B(r) and the energy density (his eq. 11) are exactly his. The
+  numbers are scaled to be seeable: he uses α = 10¹⁷ and R̃ = Δ̃ = 10⁻¹⁵ m. Here
+  R̃ = Δ̃ = half the flat interior and α defaults to 4 (9 / 0 change it). α is
+  raised automatically if the ship wouldn't fit.
+- The ship is the same size as before, so in coordinates it is 1/(1 + α) as big.
+  The ship camera's distance (wheel) is a measured distance.
+- From outside, the pocket is a small bead that lenses like a very dense glass
+  ball, with a tiny-looking ship inside. It is there before departure.
+- From inside, light behaves as if inside glass with refractive index 1 + α.
+  Only light within a cone gets in or out. Beyond that it
+  is totally internally reflected: you see black, or the ship mirrored in the wall.
+- With G on, the pocket wall glows purple (negative energy) with a thin orange
+  layer on its inside (positive energy). That's the sign pattern he finds.
+
+`screenshots/reference/` has 28 labelled stills covering all of this (40–45 are the
+pocket). The observer
 shots are timed relative to when each event's light reaches that observer.
 
 ### Simplifications
@@ -144,7 +174,7 @@ vendored raylib, `#include` resolver for GLSL and `dual.glsl` autodiff.
 | `src/gpu/warp_renderer.c` | draws one fullscreen quad with that fragment shader into a render texture; shaders loaded from disk or embedded; `#version 330` on desktop, `#version 300 es` in the browser |
 | `web/shell.html` | the browser page around the WebGL2 canvas |
 | `src/game/game.c` | timeline, cameras, scene, HUD, `--shots`, `--frames` |
-| `tests/physics_test.c` | double-precision CPU reference with 9 pass/fail checks |
+| `tests/physics_test.c` | double-precision CPU reference with 14 pass/fail checks (5 for the pocket: B's shape, eq. 11 against the curvature, autodiff, light delay through the pocket = extra proper diameter, total internal reflection) |
 
 Differences from the black-hole project, all found in feasibility testing:
 

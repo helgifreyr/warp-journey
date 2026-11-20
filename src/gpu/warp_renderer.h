@@ -21,6 +21,9 @@ typedef struct {
     Vector3 bubX, bubY, bubZ;                 // journey axes in world space
     float R, sigma;
     float vMax, tA, tB, tauA, pathLen;        // journey: see metric_alcubierre.glsl
+    int pocket;                               // Van Den Broeck pocket on/off
+    float pAlpha, pR, pD, pN;                 // its alpha, R~, Delta~, n
+    float pRcrit, pBcrit;                     // where B r is smallest across its wall, and that value
     float tol;
     int maxSteps;
     int showShip, doppler;

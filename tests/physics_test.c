@@ -8,7 +8,9 @@
 
 // journey = 0: constant-speed bubble at v.  journey = 1: the game's trip, with
 // speed profile v(t) peaking at vmax = v, exactly as in metric_alcubierre.glsl.
-typedef struct { double v, R, sigma; int journey; double tA, tB, tau; } Params;
+// pocket = 1 adds Van Den Broeck's B(r_s) (alpha, Rt, Dt, n as in his eq. 5, 12-13).
+typedef struct { double v, R, sigma; int journey; double tA, tB, tau;
+                 int pocket; double alpha, Rt, Dt, n; } Params;
 
 static Dual dual_tanh(Dual a) { double t = tanh(a.f); return dual_create(t, a.s * (1.0 - t * t)); }
 static Dual shape(Dual r, const Params* P) {
@@ -42,15 +44,26 @@ static Dual traj_x(Dual t, const Params* P) {
     Dual w = dual_div_scalar(dual_add_scalar(t, -tD), P->tau);
     return dual_add_scalar(dual_mul_scalar(dual_sub(w, ramp_I(w)), P->v * P->tau), P->v * (tD - P->tA - 0.5 * P->tau));
 }
+// Van Den Broeck eq. 12: B = alpha (-(n-1) w^n + n w^(n-1)) + 1, w = (Rt + Dt - r) / Dt
+static Dual vdb_B(Dual r, const Params* P) {
+    if (!P->pocket || r.f >= P->Rt + P->Dt) return dual_constant(1);
+    if (r.f <= P->Rt) return dual_constant(1 + P->alpha);
+    Dual w = dual_div_scalar(dual_scalar_sub(P->Rt + P->Dt, r), P->Dt);
+    Dual t = dual_add(dual_mul_scalar(dual_pow(w, P->n), -(P->n - 1)), dual_mul_scalar(dual_pow(w, P->n - 1), P->n));
+    return dual_add_scalar(dual_mul_scalar(t, P->alpha), 1);
+}
+static double B_at(double r, const Params* P) { return vdb_B(dual_constant(r), P).f; }
 static void ginv_dual(const Dual q[4], const Params* P, Dual g[10]) {
     Dual X = P->journey ? traj_x(q[0], P) : dual_mul_scalar(q[0], P->v);
     Dual V = P->journey ? traj_v(q[0], P) : dual_constant(P->v);
     Dual xs = dual_sub(q[1], X);
     Dual r2 = dual_add(dual_add(dual_mul(xs, xs), dual_mul(q[2], q[2])), dual_mul(q[3], q[3]));
-    Dual vf = dual_mul(shape(dual_sqrt(dual_add_scalar(r2, 1e-24)), P), V);
-    Dual Z = dual_constant(0), O = dual_constant(1);
+    Dual r = dual_sqrt(dual_add_scalar(r2, 1e-24));
+    Dual vf = dual_mul(shape(r, P), V);
+    Dual B = vdb_B(r, P), iB2 = dual_scalar_div(1, dual_mul(B, B));
+    Dual Z = dual_constant(0);
     g[0] = dual_constant(-1); g[1] = dual_neg(vf); g[2] = Z; g[3] = Z;
-    g[4] = dual_sub(O, dual_mul(vf, vf)); g[5] = Z; g[6] = Z; g[7] = O; g[8] = Z; g[9] = O;
+    g[4] = dual_sub(iB2, dual_mul(vf, vf)); g[5] = Z; g[6] = Z; g[7] = iB2; g[8] = Z; g[9] = iB2;
 }
 static double quad(const Dual g[10], const double p[4], int d) {
 #define G(i) (d ? g[i].s : g[i].f)
@@ -104,7 +117,7 @@ static void check(const char* name, int ok, const char* detail) {
 }
 
 int main(void) {
-    Params P = { 2.0, 1.0, 8.0, 0, 0, 0, 0 };
+    Params P = { 2.0, 1.0, 8.0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
     char buf[160];
     printf("Alcubierre physics checks (CPU, double)\n");
 
@@ -181,7 +194,7 @@ int main(void) {
 
     // 6. journey trajectory: exactly at rest before departure, X' = v, X 0 -> L
     {
-        Params J = { 4.0, 2.2, 6.0, 1, 0.0, 44.0, 4.0 };
+        Params J = { 4.0, 2.2, 6.0, 1, 0.0, 44.0, 4.0, 0, 0, 0, 0, 0 };
         double worstd = 0;
         for (double t = -10; t <= 60; t += 0.7) {
             Dual X = traj_x(dual_variable(t), &J);
@@ -199,7 +212,7 @@ int main(void) {
     // 7. journey metric: autodiff gradient, including d/dt through the
     //    acceleration, matches finite differences
     {
-        Params J = { 4.0, 2.2, 6.0, 1, 0.0, 44.0, 4.0 };
+        Params J = { 4.0, 2.2, 6.0, 1, 0.0, 44.0, 4.0, 0, 0, 0, 0, 0 };
         double worstj = 0;
         double ev[][4] = { {1.3, 0.9, 0.5, 0.2}, {2.7, 7.0, 1.8, 0.4}, {42.5, 158.0, 1.2, -0.9}, {20, 72.5, 2.0, 0.3} };
         double pj[4] = { 1.1, 0.6, -0.4, 0.3 };
@@ -214,6 +227,99 @@ int main(void) {
         }
         snprintf(buf, sizeof buf, "max |AD - FD| = %.1e", worstj);
         check("journey metric: autodiff incl. d/dt matches FD", worstj < 1e-5, buf);
+    }
+
+    // ---- Van Den Broeck pocket -------------------------------------------------------
+    Params V = { 0.0, 2.2, 6.0, 0, 0, 0, 0, 1, 4.0, 0.85, 0.85, 80.0 };
+
+    // 8. eq. 12 joins 1 + alpha to 1 with zero slope at both ends
+    {
+        double e = 1e-9;
+        Dual bi = vdb_B(dual_variable(V.Rt + e), &V), bo = vdb_B(dual_variable(V.Rt + V.Dt - e), &V);
+        snprintf(buf, sizeof buf, "B %.6f -> %.6f, slopes %.1e %.1e", bi.f, bo.f, bi.s, bo.s);
+        check("pocket: B goes 1+alpha -> 1, flat at both ends",
+              fabs(bi.f - 5.0) < 1e-6 && fabs(bo.f - 1.0) < 1e-6 && fabs(bi.s) < 1e-3 && fabs(bo.s) < 1e-3, buf);
+    }
+
+    // 9. eq. 11 (8 pi rho = B'^2/B^4 - 2B''/B^3 - 4B'/(rB^3)) against the independent
+    //    formula for a conformally flat slice gamma = psi^4 delta, psi = sqrt(B), K = 0:
+    //    8 pi rho = R/2 = -4 psi^-5 Laplacian(psi), Laplacian by finite differences
+    {
+        double worst = 0;
+        double ws[] = { 0.5, 0.9, 0.95, 0.975, 0.99 };
+        for (int k = 0; k < 5; k++) {
+            double r = V.Rt + V.Dt - ws[k] * V.Dt;
+            Dual b1 = vdb_B(dual_variable(r), &V);
+            double h = 1e-4, Bp = b1.s, Bpp = (B_at(r + h, &V) - 2 * b1.f + B_at(r - h, &V)) / (h * h);
+            double B = b1.f, eq11 = Bp * Bp / pow(B, 4) - 2 * Bpp / pow(B, 3) - 4 * Bp / (r * pow(B, 3));
+            // 3-D Laplacian of psi at (r, 0, 0) by a 7-point stencil
+            double hs = 1e-4, c = sqrt(B), lap = 0;
+            double pts6[6][3] = { {r+hs,0,0}, {r-hs,0,0}, {r,hs,0}, {r,-hs,0}, {r,0,hs}, {r,0,-hs} };
+            for (int i = 0; i < 6; i++) lap += sqrt(B_at(sqrt(pts6[i][0]*pts6[i][0] + pts6[i][1]*pts6[i][1] + pts6[i][2]*pts6[i][2]), &V));
+            lap = (lap - 6 * c) / (hs * hs);
+            double ref = -4 * pow(c, -5) * lap;
+            worst = fmax(worst, fabs(eq11 - ref) / fmax(1, fabs(ref)));
+        }
+        snprintf(buf, sizeof buf, "max rel. difference %.1e", worst);
+        check("pocket: eq. 11 energy density = R/16pi", worst < 1e-3, buf);
+    }
+
+    // 10. autodiff gradient with pocket + journey (points inside, in the wall, outside)
+    {
+        Params J = V; J.v = 4.0; J.journey = 1; J.tA = 0; J.tB = 44; J.tau = 4;
+        double worstp = 0;
+        double ev[][4] = { {-3, 0.3, 0.2, 0.1}, {2.0, 1.0, 0.3, 0.2}, {20, 72.5, 0.85, 0.2}, {3.1, 2.3, 0.4, 0.1} };
+        ev[1][1] = traj_x(dual_constant(2.0), &J).f + 0.88;   // inside the steep layer
+        double pj[4] = { 1.1, 0.6, -0.4, 0.3 };
+        for (int k = 0; k < 4; k++) {
+            double y[8], dy[8];
+            memcpy(y, ev[k], 32); memcpy(y + 4, pj, 32); rhs(y, &J, dy);
+            for (int w = 0; w < 4; w++) {
+                double a[4], b[4], h = 1e-7;
+                memcpy(a, ev[k], 32); memcpy(b, ev[k], 32); a[w] += h; b[w] -= h;
+                double fd = (H(a, pj, &J) - H(b, pj, &J)) / (2 * h);
+                worstp = fmax(worstp, fabs(-dy[4 + w] - fd) / fmax(1, fabs(fd)));
+            }
+        }
+        snprintf(buf, sizeof buf, "max rel |AD - FD| = %.1e", worstp);
+        check("pocket metric: autodiff matches FD", worstp < 1e-4, buf);
+    }
+
+    // integrate a future-directed ray in the static pocket; h kept below the thin layer
+    #define POCKET_STEP(y, h) do { double rr_ = sqrt(y[1]*y[1]+y[2]*y[2]+y[3]*y[3]); double Bq_ = B_at(rr_, &V); \
+        h = fmin(h, 0.002 * Bq_ * Bq_); rk45(y, &h, 1e-10, &V); } while (0)
+
+    // 11. light straight through the middle is delayed by the extra proper diameter:
+    //     2 * integral (B - 1) dr = 2 alpha (Rt + Dt * 2/(n+1))
+    {
+        double y[8] = { 0, -3, 0, 0, -1, 1, 0, 0 }, h = 1e-3, prev[8];
+        while (y[1] < 3) { memcpy(prev, y, sizeof prev); POCKET_STEP(y, h); }
+        double tcross = prev[0] + (y[0] - prev[0]) * (3 - prev[1]) / (y[1] - prev[1]);
+        double expect = 6 + 2 * V.alpha * (V.Rt + V.Dt * 2 / (V.n + 1));
+        snprintf(buf, sizeof buf, "t = %.6f, expected %.6f", tcross, expect);
+        check("pocket: light crossing time = proper diameter", fabs(tcross - expect) < 1e-4, buf);
+    }
+
+    // 12. total internal reflection: from inside, light gets out only if its impact
+    //     parameter b = B r sin(angle) is below the minimum of B r across the wall
+    {
+        double bmin = 1e30;
+        for (int i = 0; i <= 200000; i++) { double r = V.Rt + V.Dt * i / 200000.0; bmin = fmin(bmin, B_at(r, &V) * r); }
+        int escaped[2]; double drift = 0;
+        for (int k = 0; k < 2; k++) {
+            double b = bmin * (k == 0 ? 0.98 : 1.02), r0 = 0.3, Bi = 1 + V.alpha;
+            double s = b / (Bi * r0), c = sqrt(1 - s * s);
+            double y[8] = { 0, r0, 0, 0, -1, Bi * c, Bi * s, 0 }, h = 1e-3;
+            escaped[k] = 0;
+            for (int n = 0; n < 400000 && y[0] < 80; n++) {
+                POCKET_STEP(y, h);
+                drift = fmax(drift, fabs((y[1] * y[6] - y[2] * y[5]) - b) / b);
+                if (sqrt(y[1]*y[1] + y[2]*y[2] + y[3]*y[3]) > 2.0) { escaped[k] = 1; break; }
+            }
+        }
+        snprintf(buf, sizeof buf, "b_min %.4f: 0.98 b_min %s, 1.02 b_min %s, b drift %.0e", bmin,
+                 escaped[0] ? "escapes" : "TRAPPED", escaped[1] ? "ESCAPES" : "trapped", drift);
+        check("pocket: total internal reflection at b > min(B r)", escaped[0] && !escaped[1] && drift < 1e-5, buf);
     }
 
     printf(failures ? "%d check(s) FAILED\n" : "all checks passed\n", failures);

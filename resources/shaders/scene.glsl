@@ -125,7 +125,8 @@ bool scene_hit(vec3 a, vec3 s, float tmax, inout Hit hit) {
 
 // Ship, in COMOVING coordinates (it rides at the bubble centre). Hull is an
 // ellipsoid; the "warp ring" is a flat annulus around it, facing forward.
-float ship_scale() { return min(1.0, Rb / 1.6); }
+// Inside a Van Den Broeck pocket the same ship is 1/B smaller in coordinates.
+float ship_scale() { return min(1.0, Rb / 1.6) / pocket_B_in(); }
 bool ship_hit(vec3 a, vec3 s, float tmax, inout Hit hit) {
     float k = ship_scale();
     bool found = false;

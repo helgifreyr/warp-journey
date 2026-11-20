@@ -184,6 +184,13 @@ void warp_renderer_render(WarpRenderer* r, const WarpFrame* f) {
     set_f(p, "tauA", f->tauA);
     set_f(p, "pathLen", f->pathLen);
     set_f(p, "Rb", f->R);
+    set_i(p, "pocket", f->pocket);
+    set_f(p, "pAlpha", f->pAlpha);
+    set_f(p, "pR", f->pR);
+    set_f(p, "pD", f->pD);
+    set_f(p, "pN", f->pN);
+    set_f(p, "pRcrit", f->pRcrit);
+    set_f(p, "pBcrit", f->pBcrit);
     set_f(p, "sigma", f->sigma);
     set_f(p, "tol", f->tol);
     set_i(p, "maxSteps", f->maxSteps);

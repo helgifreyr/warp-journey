@@ -18,6 +18,9 @@ uniform float tanHalfFov, aspect;
 uniform vec3  bubX, bubY, bubZ;                  // journey-frame axes in world space
 uniform float Rb, sigma;
 uniform float vMax, tA, tB, tauA, pathLen;       // the journey
+uniform int   pocket;                            // Van Den Broeck pocket on/off
+uniform float pAlpha, pR, pD, pN;                // its alpha, R~, Delta~, n (eq. 5, 12)
+uniform float pRcrit, pBcrit;                    // min of B(r) r across the wall, and where
 uniform float tol;
 uniform int   maxSteps;
 uniform int   showShip, doppler;
@@ -30,7 +33,8 @@ float vNow;   // bubble speed at tNow (used by ship shading)
 #include "geodesic_rk45.glsl"
 #include "scene.glsl"
 
-const float HORIZON_LOG = 12.0;   // e^12 ~ 1.6e5 frequency ratio: call it a horizon
+const float HORIZON_LOG = 12.0;
+const float POCKET_GLOW = 0.004;  // pocket shell integrates to ~50 across vs ~0.5 for the Alcubierre wall   // e^12 ~ 1.6e5 frequency ratio: call it a horizon
 
 vec3 doppler_grade(vec3 c, float D) {
     if (doppler == 0) return c;
@@ -57,8 +61,10 @@ void main() {
 
     vec4 q = vec4(tNow, camPos);
     vec4 p = eulerian_null_momentum(q, dir);
-    float logs = 0.0, glow = 0.0, h = 0.05;
+    float logs = 0.0, glow = 0.0, glowPos = 0.0, h = 0.05;
+    bool trapped = false;
     float infl = metric_influence_radius();
+    float pOut = pocket_outer();
 
     vec3 col = vec3(0.0);
     bool done = false;
@@ -67,6 +73,14 @@ void main() {
         if (metric_ray_is_free(q.yzw, k.yzw)) break;          // flat from here on: finish straight
         float rr = length(alc_comoving(q));
         float hmax = rr > infl ? max(0.05, (rr - infl) / (1.0 + vMax)) : 1.0;  // stride through flat parts
+        if (pocket != 0 && rr < pOut + 1.0) {
+            // B jumps from 1 to 1 + alpha in a thin layer just outside pR (eq. 12 with n = 80):
+            // walk up to it, never across it. Light covers 1/B^2 coordinate distance per unit h.
+            float Bh = vdb_B(dual_const(rr)).f;
+            float dLayer = max(max(rr - (pR + 0.15 * pD), pR - rr), 0.0);
+            float hp = Bh * Bh * max(0.5 * dLayer, 0.004);
+            hmax = rr < pR ? hp : min(hmax, hp);
+        }
         h = min(h, hmax);
         vec4 nq, np;
         float err = rk45_try(q, p, h, tol, nq, np);
@@ -94,13 +108,38 @@ void main() {
                 break;
             }
             glow += metric_exotic_density(0.5 * (q + nq)) * length(s);
+            if (pocket != 0) {
+                // the pocket's energy sits in a thin shell: sample the step several times
+                vec3 c0 = alc_comoving(q), c1 = alc_comoving(nq);
+                if (min(length(c0), length(c1)) < pOut + length(c1 - c0)) {
+                    for (int j = 0; j < 8; j++) {
+                        float rho = metric_pocket_density(length(mix(c0, c1, (float(j) + 0.5) / 8.0)));
+                        float dl = length(s) / 8.0;
+                        if (rho < 0.0) glow -= rho * dl * POCKET_GLOW; else glowPos += rho * dl * POCKET_GLOW;
+                    }
+                }
+            }
             q = nq; p = np;
             renormalise(p, logs);
+            if (pocket != 0) {
+                // Trapped light (impact parameter above the wall's minimum B r) can never get
+                // past pRcrit; if float drift carries it there, it is leaking: stop it.
+                vec3 c = alc_comoving(q);
+                float rc = length(c);
+                if (rc < pRcrit) {
+                    float b = vdb_B(dual_const(rc)).f * length(cross(c, normalize(p.yzw)));
+                    trapped = b > pBcrit * 1.002;
+                } else if (trapped) { col = vec3(0.0); done = true; break; }
+            }
             if (logs >  HORIZON_LOG) { col = vec3(0.0); done = true; break; }              // redshifted away
             if (logs < -HORIZON_LOG) { col = vec3(6.0, 7.0, 9.0); done = true; break; }    // blueshift flash
         }
         h = rk45_next_h(h, err);
     }
+
+    // Out of steps while still inside the pocket: light bouncing off its wall forever
+    // (total internal reflection). Nothing at the end of it: black.
+    if (!done && pocket != 0 && length(alc_comoving(q)) < pOut) { col = vec3(0.0); done = true; }
 
     if (!done) {
         vec4 k = geodesic_velocity(q, p);
@@ -112,7 +151,8 @@ void main() {
         col = doppler_grade(col, D);
     }
 
-    col += vec3(0.75, 0.25, 1.0) * glow * glowGain;
+    col += vec3(0.75, 0.25, 1.0) * glow * glowGain;          // negative energy
+    col += vec3(1.0, 0.62, 0.2) * glowPos * glowGain;        // positive energy (pocket's inner layer)
     col = aces(col * exposure);
     finalColor = vec4(pow(col, vec3(1.0 / 2.2)), 1.0);
 }

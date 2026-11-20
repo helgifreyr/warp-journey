@@ -19,7 +19,19 @@
 // ADM form: lapse 1, shift beta^x = -v f, flat slices. Inverse metric:
 //   g^00 = -1,  g^0x = -v f,  g^xx = 1 - v^2 f^2,  g^yy = g^zz = 1.
 //
-// Expects uniforms: float Rb, sigma, vMax, tA (start), tB (stop), tauA (ramp time), pathLen.
+// Optional Van Den Broeck pocket (C. Van Den Broeck, Class. Quantum Grav. 16
+// (1999) 3973, eq. 4):
+//   ds^2 = -dt^2 + B^2(r_s) [ (dx - v f(r_s) dt)^2 + dy^2 + dz^2 ]
+// with B = 1 + alpha inside r_s < Rt, B = 1 beyond Rt + Dt, and in between his
+// eq. 12-13:   B = alpha (-(n-1) w^n + n w^(n-1)) + 1,   w = (Rt + Dt - r_s) / Dt.
+// The pocket sits where f = 1 (Rt + Dt < R). Space inside is flat but expanded by
+// 1 + alpha: a region of coordinate radius Rt has proper radius (1 + alpha) Rt.
+// B does not depend on v, so the pocket exists (and needs energy) at rest.
+// Lapse 1, shift beta^x = -v f, spatial metric B^2 delta. Inverse metric:
+//   g^00 = -1,  g^0x = -v f,  g^xx = 1/B^2 - v^2 f^2,  g^yy = g^zz = 1/B^2.
+//
+// Expects uniforms: float Rb, sigma, vMax, tA (start), tB (stop), tauA (ramp time), pathLen,
+//                   int pocket, float pAlpha, pR (Rt), pD (Dt), pN (n).
 // ---------------------------------------------------------------------------
 
 Dual dual_tanh(Dual a) {
@@ -64,6 +76,33 @@ Dual alc_shape(Dual r) {
     return dual_div_scalar(dual_sub(a, b), n);
 }
 
+// ---- Van Den Broeck pocket ---------------------------------------------------------------
+float pocket_outer() { return pocket != 0 ? pR + pD : 0.0; }
+float pocket_B_in()  { return pocket != 0 ? 1.0 + pAlpha : 1.0; }
+
+Dual vdb_B(Dual r) {
+    if (pocket == 0 || r.f >= pR + pD) return dual_const(1.0);
+    if (r.f <= pR) return dual_const(1.0 + pAlpha);
+    Dual w = dual_div_scalar(dual_scalar_sub(pR + pD, r), pD);           // eq. 13
+    // eq. 12 written as alpha w^(n-1) (n - (n-1) w) + 1
+    Dual wn1 = dual_pow(w, pN - 1.0);
+    return dual_add_scalar(dual_mul_scalar(dual_mul(wn1, dual_scalar_sub(pN, dual_mul_scalar(w, pN - 1.0))), pAlpha), 1.0);
+}
+
+// Van Den Broeck eq. 11: energy density seen by Eulerian observers where B varies
+// (and f = 1), times 8 pi:  B'^2/B^4 - 2 B''/B^3 - 4 B'/(r B^3).  Signed: negative
+// over most of the transition, positive in a thin layer at its inner edge.
+float metric_pocket_density(float r) {
+    if (pocket == 0 || r <= pR || r >= pR + pD) return 0.0;
+    float n = pN, w = (pR + pD - r) / pD;
+    float B   = pAlpha * pow(w, n - 1.0) * (n - (n - 1.0) * w) + 1.0;
+    float dBw = pAlpha * n * (n - 1.0) * pow(w, n - 2.0) * (1.0 - w);
+    float d2B = pAlpha * n * (n - 1.0) * ((n - 2.0) * pow(w, n - 3.0) * (1.0 - w) - pow(w, n - 2.0));
+    float Bp = -dBw / pD, Bpp = d2B / (pD * pD);
+    float B3 = B * B * B;
+    return Bp * Bp / (B3 * B) - 2.0 * Bpp / B3 - 4.0 * Bp / (r * B3);
+}
+
 // position relative to the bubble centre at the event q = (t, x, y, z)
 vec3 alc_comoving(vec4 q) { return vec3(q.y - traj_x_at(q.x), q.z, q.w); }
 
@@ -74,10 +113,12 @@ void metric_ginv(Dual q[4], out Dual g[10]) {
     Dual r2 = dual_add(dual_add(dual_mul(xs, xs), dual_mul(q[2], q[2])), dual_mul(q[3], q[3]));
     Dual r  = dual_sqrt(dual_add_scalar(r2, 1e-12));
     Dual vf = dual_mul(alc_shape(r), traj_v(q[0]));
-    Dual Z = dual_const(0.0), O = dual_const(1.0);
+    Dual B = vdb_B(r);
+    Dual iB2 = dual_scalar_div(1.0, dual_mul(B, B));                     // 1 when the pocket is off
+    Dual Z = dual_const(0.0);
     g[0] = dual_const(-1.0); g[1] = dual_neg(vf); g[2] = Z; g[3] = Z;
-    g[4] = dual_sub(O, dual_mul(vf, vf)); g[5] = Z; g[6] = Z;
-    g[7] = O; g[8] = Z; g[9] = O;
+    g[4] = dual_sub(iB2, dual_mul(vf, vf)); g[5] = Z; g[6] = Z;
+    g[7] = iB2; g[8] = Z; g[9] = iB2;
 }
 
 // Beyond this comoving radius the bubble's metric is flat to ~1e-5.

@@ -51,6 +51,8 @@ struct Game {
 
     // journey
     float vMax, R, sigma;
+    bool pocket;                      // Van Den Broeck pocket (K)
+    float alpha;                      // its expansion: inside is 1 + alpha times bigger
     float t, playRate;
     bool playing;
 
@@ -122,6 +124,53 @@ static void angles_from_dir(Vector3 d, float* yaw, float* pitch) {
 static float ship_cam_max_dist(const Game* g) {   // stay inside the flat interior
     return fmaxf(0.9f, g->R - 2.5f / g->sigma - 0.05f);
 }
+
+// ---- Van Den Broeck pocket (Class. Quantum Grav. 16 (1999) 3973) ----------------------------
+// B = 1 + alpha for r < Rt, eq. 12 between, 1 beyond Rt + Dt. Like the paper, Rt = Dt,
+// and the pocket sits where the Alcubierre f is 1 (Rt + Dt < R).
+#define POCKET_N 80.0                 // his n in eq. 12 ("sufficiently large"; he uses 80)
+static float pocket_Rt(const Game* g) { return fmaxf(0.25f, 0.5f * (g->R - 3.0f / g->sigma)); }
+// alpha actually used: at least enough that the ship fits inside the pocket
+static float pocket_alpha(const Game* g) {
+    float k = fminf(1.0f, g->R / 1.6f);              // ship_scale() in scene.glsl
+    return fmaxf(g->alpha, 0.98f * k / (0.8f * pocket_Rt(g)) - 1.0f);
+}
+// proper (measured) distance from the centre out to coordinate radius r: integral of B dr,
+// done exactly (eq. 12 integrates to alpha Dt [w^n - (n-1)/(n+1) w^(n+1)])
+static double pocket_F(double w) { return pow(w, POCKET_N) - (POCKET_N - 1) / (POCKET_N + 1) * pow(w, POCKET_N + 1); }
+static double coord_to_proper(const Game* g, double r) {
+    if (!g->pocket) return r;
+    double a = pocket_alpha(g), Rt = pocket_Rt(g), Dt = Rt;
+    if (r <= Rt) return (1 + a) * r;
+    double w = r < Rt + Dt ? (Rt + Dt - r) / Dt : 0.0;
+    return (1 + a) * Rt + (r - Rt) + a * Dt * (pocket_F(1.0) - pocket_F(w));
+}
+static double proper_to_coord(const Game* g, double s) {
+    if (!g->pocket) return s;
+    double a = pocket_alpha(g), Rt = pocket_Rt(g), Dt = Rt;
+    if (s <= (1 + a) * Rt) return s / (1 + a);
+    double sOut = coord_to_proper(g, Rt + Dt);
+    if (s >= sOut) return Rt + Dt + (s - sOut);
+    double lo = Rt, hi = Rt + Dt;
+    for (int i = 0; i < 60; i++) { double m = 0.5 * (lo + hi); if (coord_to_proper(g, m) < s) lo = m; else hi = m; }
+    return 0.5 * (lo + hi);
+}
+// Light inside a static, spherical pocket keeps its impact parameter b = B(r) r sin(angle
+// from the radial direction). It can only cross the wall if B r >= b all the way out, so
+// anything with b above the minimum of B r over the wall is trapped for good (total
+// internal reflection). Returns that minimum and where it is.
+static void pocket_trap(const Game* g, float* rMin, float* bMin) {
+    double a = pocket_alpha(g), Rt = pocket_Rt(g), Dt = Rt, best = 1e30, at = Rt + Dt;
+    for (int i = 0; i <= 4000; i++) {
+        double r = Rt + Dt * i / 4000.0, w = (Rt + Dt - r) / Dt;
+        double B = a * pow(w, POCKET_N - 1) * (POCKET_N - (POCKET_N - 1) * w) + 1;
+        if (B * r < best) { best = B * r; at = r; }
+    }
+    *rMin = (float)at; *bMin = (float)best;
+}
+
+// ship camera distance is kept in PROPER units, so the ship looks the same size
+static float ship_cam_max_proper(const Game* g) { return (float)coord_to_proper(g, ship_cam_max_dist(g)); }
 
 // Chase camera: must stay outside the bubble wall (the metric there is not flat).
 static float chase_min_dist(const Game* g) { return g->R + 3.0f / g->sigma + 0.6f; }
@@ -196,7 +245,8 @@ static void camera_frame(const Game* g, Vector3* pos, Vector3* fwd, Vector3* rig
     } else if (g->cam == CAM_SHIP) {
         Vector3 d = dir_from_angles(g->shipYaw, g->shipPitch);
         Vector3 ship = { traj_x(g, g->t), 0, 0 };
-        *pos = Vector3Add(ship, Vector3Scale(d, fminf(g->shipDist, ship_cam_max_dist(g))));
+        float s = fminf(g->shipDist, ship_cam_max_proper(g));
+        *pos = Vector3Add(ship, Vector3Scale(d, (float)proper_to_coord(g, s)));
         *fwd = Vector3Negate(d);
     } else {
         *pos = g->obsPos;
@@ -266,6 +316,7 @@ Game* game_create(const char* shader_dir) {
     g->vMax = 4.0f;
     g->R = 2.2f;
     g->sigma = 6.0f;
+    g->alpha = 4.0f;
     g->t = t_min();
     g->playRate = 4.0f;
     g->playing = true;
@@ -353,7 +404,7 @@ void game_update(Game* g, float dt) {
     if (g->cam == CAM_SHIP) {
         g->shipYaw += md.x * sens;
         g->shipPitch = Clamp(g->shipPitch + md.y * sens, -1.5f, 1.5f);
-        g->shipDist = Clamp(g->shipDist * powf(0.9f, wheel), 0.9f, ship_cam_max_dist(g));
+        g->shipDist = Clamp(g->shipDist * powf(0.9f, wheel), 0.9f, ship_cam_max_proper(g));
     } else if (g->cam == CAM_CHASE) {
         g->chaseYaw += md.x * sens;
         g->chasePitch = Clamp(g->chasePitch + md.y * sens, -1.5f, 1.5f);
@@ -392,6 +443,19 @@ void game_update(Game* g, float dt) {
     if (IsKeyDown(KEY_COMMA))  g->exposure = fmaxf(0.1f, g->exposure * (1.0f - dt));
 
     if (IsKeyPressed(KEY_C)) select_camera(g, g->cam == CAM_SHIP ? CAM_DEPART : CAM_SHIP);
+    if (IsKeyPressed(KEY_K)) {
+        g->pocket = !g->pocket;
+        char tt[160];
+        if (g->pocket) snprintf(tt, sizeof tt, "Van Den Broeck pocket ON: inside is %.1fx bigger than outside (9 / 0 change it)", 1 + pocket_alpha(g));
+        else snprintf(tt, sizeof tt, "Van Den Broeck pocket OFF: plain Alcubierre bubble");
+        toast(g, tt);
+    }
+    if (g->pocket && (IsKeyPressed(KEY_NINE) || IsKeyPressed(KEY_ZERO))) {
+        g->alpha = Clamp(pocket_alpha(g) * (IsKeyPressed(KEY_ZERO) ? 1.25f : 0.8f), 0.5f, 40.0f);
+        char tt[160];
+        snprintf(tt, sizeof tt, "Pocket: inside is %.1fx bigger than outside (alpha = %.1f)", 1 + pocket_alpha(g), pocket_alpha(g));
+        toast(g, tt);
+    }
     if (IsKeyPressed(KEY_B)) g->doppler = !g->doppler;
     if (IsKeyPressed(KEY_G)) g->glow = !g->glow;
     if (IsKeyPressed(KEY_H)) g->hud = !g->hud;
@@ -432,6 +496,12 @@ static void render_view(Game* g, int w, int h) {
     f.tB = t_arrive(g);
     f.tauA = T_ACCEL;
     f.pathLen = PATH_LEN;
+    f.pocket = g->pocket;
+    f.pAlpha = pocket_alpha(g);
+    f.pR = pocket_Rt(g);
+    f.pD = pocket_Rt(g);
+    f.pN = (float)POCKET_N;
+    pocket_trap(g, &f.pRcrit, &f.pBcrit);
     f.tol = 1e-4f;
     f.maxSteps = 600;
     f.showShip = 1;
@@ -635,6 +705,21 @@ static void draw_info(const Game* g) {
     const char* title = "";
     char body[1400];
     info_text(g, &title, body, sizeof body);
+    if (g->pocket) {
+        size_t L = strlen(body);
+        float a = pocket_alpha(g), Rt = pocket_Rt(g);
+        bool inside = g->cam == CAM_SHIP && fminf(g->shipDist, ship_cam_max_proper(g)) < (1 + a) * Rt;
+        char view[300];
+        if (inside)
+            snprintf(view, sizeof view, "Its wall bends light like glass with a refractive index of %.0f: only a cone of the "
+                     "outside gets in. Look sideways and light bounces off the wall: the ship mirrored, or black.", 1 + a);
+        else
+            snprintf(view, sizeof view, "From outside it is a small, strongly lensing bead around a tiny-looking ship. "
+                     "With G on, its wall glows purple (negative energy) with a thin orange (positive) inner layer.");
+        snprintf(body + L, sizeof body - L, "\nVan Den Broeck pocket (K): the ship sits in a region %.1fx bigger inside "
+                 "than outside, %.1f across inside but %.1f from outside. It doesn't depend on speed, so it is there "
+                 "at rest. %s", 1 + a, 2 * (1 + a) * Rt, 2 * Rt, view);
+    }
     int bw = (int)fminf(460.0f, sw * 0.45f), pad = 12, fs = 15, lh = 19;
     int th = wrap_text(title, 0, 0, bw - 2 * pad, 17, 21, WHITE, false);
     int bh = th + 6 + wrap_text(body, 0, 0, bw - 2 * pad, fs, lh, WHITE, false) + 2 * pad;
@@ -685,8 +770,10 @@ static void draw_hud(Game* g) {
     } else {
         DrawText("inside the bubble: flat, free-falling, no g-forces", 22, 90, 14, LIGHTGRAY);
     }
-    DrawText(TextFormat("cruise %.2f c   bubble R %.1f   wall sharpness %.1f   %d fps",
-             g->vMax, g->R, g->sigma, GetFPS()), 22, 108, 14, GRAY);
+    char pk[40] = "";
+    if (g->pocket) snprintf(pk, sizeof pk, "   pocket x%.1f", 1 + pocket_alpha(g));
+    DrawText(TextFormat("cruise %.2f c   bubble R %.1f   wall sharpness %.1f%s   %d fps",
+             g->vMax, g->R, g->sigma, pk, GetFPS()), 22, 108, 14, GRAY);
     DrawText(g->help ? "F1 or ? hides the controls" : "F1 or ? shows the controls", 22, 126, 12, DARKGRAY);
 
     if (g->help || g->helpTimer > 0) {
@@ -704,6 +791,7 @@ static void draw_hud(Game* g) {
             "PGUP PGDN    cruise speed      [ ]  bubble size",
             "- =          wall sharpness    , .  exposure",
             "B / G        Doppler colour / exotic-matter glow",
+            "K            Van Den Broeck pocket     9 0  its size",
             "I            info box: what this camera is showing",
 #if defined(PLATFORM_WEB)
             "P            screenshot (no HUD), downloaded as a PNG",
@@ -757,37 +845,45 @@ typedef struct {
     int anchor;              // 0 departure, 1 arrival, 2/3 = when this observer SEES departure/arrival
     float yaw, pitch, dist;  // ship and chase cameras only
     bool glow;
+    bool pocket;
 } Shot;
 
 int game_render_reference_shots(Game* g, const char* out_dir) {
     static const Shot shots[] = {
         // riding along: camera inside the bubble, behind / ahead / beside the ship
-        { "01_ship_waiting",              CAM_SHIP,   -4.0f, 0, -2.45f, 0.30f, 1.6f, false },
-        { "02_ship_accelerating",         CAM_SHIP,    2.0f, 0, -2.45f, 0.30f, 1.6f, true  },
-        { "03_ship_cruise",               CAM_SHIP,   15.0f, 0, -2.45f, 0.30f, 1.6f, false },
-        { "04_ship_cruise_looking_back",  CAM_SHIP,   15.0f, 0,  0.50f, 0.20f, 1.6f, false },
-        { "05_ship_cruise_side",          CAM_SHIP,   15.0f, 0, -1.57f, 0.10f, 1.6f, false },
-        { "06_ship_cruise_glow",          CAM_SHIP,   15.0f, 0, -2.45f, 0.30f, 1.6f, true  },
-        { "07_ship_decelerating",         CAM_SHIP,   -2.0f, 1, -2.45f, 0.30f, 1.6f, true  },
-        { "08_ship_arrived",              CAM_SHIP,    6.0f, 1, -2.45f, 0.30f, 1.6f, false },
+        { "01_ship_waiting",              CAM_SHIP,   -4.0f, 0, -2.45f, 0.30f, 1.6f, false, false },
+        { "02_ship_accelerating",         CAM_SHIP,    2.0f, 0, -2.45f, 0.30f, 1.6f, true, false },
+        { "03_ship_cruise",               CAM_SHIP,   15.0f, 0, -2.45f, 0.30f, 1.6f, false, false },
+        { "04_ship_cruise_looking_back",  CAM_SHIP,   15.0f, 0,  0.50f, 0.20f, 1.6f, false, false },
+        { "05_ship_cruise_side",          CAM_SHIP,   15.0f, 0, -1.57f, 0.10f, 1.6f, false, false },
+        { "06_ship_cruise_glow",          CAM_SHIP,   15.0f, 0, -2.45f, 0.30f, 1.6f, true, false },
+        { "07_ship_decelerating",         CAM_SHIP,   -2.0f, 1, -2.45f, 0.30f, 1.6f, true, false },
+        { "08_ship_arrived",              CAM_SHIP,    6.0f, 1, -2.45f, 0.30f, 1.6f, false, false },
         // departure observer, timed from when the departure's light reaches them
-        { "10_depart_obs_waiting",        CAM_DEPART, -3.0f, 2, 0, 0, 0, false },
-        { "11_depart_obs_bubble_forms",   CAM_DEPART,  2.5f, 2, 0, 0, 0, true  },
-        { "12_depart_obs_leaving",        CAM_DEPART,  6.0f, 2, 0, 0, 0, false },
-        { "13_depart_obs_receding",       CAM_DEPART, 12.0f, 2, 0, 0, 0, false },
-        { "14_depart_obs_receding_glow",  CAM_DEPART, 12.0f, 2, 0, 0, 0, true  },
+        { "10_depart_obs_waiting",        CAM_DEPART, -3.0f, 2, 0, 0, 0, false, false },
+        { "11_depart_obs_bubble_forms",   CAM_DEPART,  2.5f, 2, 0, 0, 0, true, false },
+        { "12_depart_obs_leaving",        CAM_DEPART,  6.0f, 2, 0, 0, 0, false, false },
+        { "13_depart_obs_receding",       CAM_DEPART, 12.0f, 2, 0, 0, 0, false, false },
+        { "14_depart_obs_receding_glow",  CAM_DEPART, 12.0f, 2, 0, 0, 0, true, false },
         // arrival observer, timed from when the arrival's light reaches them
-        { "20_arrive_obs_already_here",   CAM_ARRIVE, -6.0f, 3, 0, 0, 0, false },
-        { "21_arrive_obs_first_glimpse", CAM_ARRIVE, -0.6f, 3, 0, 0, 0, false },
-        { "22_arrive_obs_appears",        CAM_ARRIVE,  0.6f, 3, 0, 0, 0, false },
-        { "23_arrive_obs_trip_in_reverse",CAM_ARRIVE,  3.0f, 3, 0, 0, 0, false },
-        { "24_arrive_obs_ghost_receding", CAM_ARRIVE, 10.0f, 3, 0, 0, 0, false },
+        { "20_arrive_obs_already_here",   CAM_ARRIVE, -6.0f, 3, 0, 0, 0, false, false },
+        { "21_arrive_obs_first_glimpse", CAM_ARRIVE, -0.6f, 3, 0, 0, 0, false, false },
+        { "22_arrive_obs_appears",        CAM_ARRIVE,  0.6f, 3, 0, 0, 0, false, false },
+        { "23_arrive_obs_trip_in_reverse",CAM_ARRIVE,  3.0f, 3, 0, 0, 0, false, false },
+        { "24_arrive_obs_ghost_receding", CAM_ARRIVE, 10.0f, 3, 0, 0, 0, false, false },
         // beside the route: it has already passed by the time you see anything
         // chase camera outside the bubble (orbiting the true position)
-        { "30_chase_waiting",             CAM_CHASE,  -4.0f, 0, PI + 0.9f, 0.25f, 7.0f, false },
-        { "31_chase_cruise_behind",       CAM_CHASE,  15.0f, 0, PI + 0.12f, 0.12f, 7.0f, false },
-        { "32_chase_cruise_side_invisible",        CAM_CHASE,  15.0f, 0, PI * 0.5f, 0.15f, 7.0f, false },
-        { "33_chase_decelerating",        CAM_CHASE,  -2.0f, 1, PI + 0.12f, 0.12f, 7.0f, false },
+        { "30_chase_waiting",             CAM_CHASE,  -4.0f, 0, PI + 0.9f, 0.25f, 7.0f, false, false },
+        { "31_chase_cruise_behind",       CAM_CHASE,  15.0f, 0, PI + 0.12f, 0.12f, 7.0f, false, false },
+        { "32_chase_cruise_side_invisible",        CAM_CHASE,  15.0f, 0, PI * 0.5f, 0.15f, 7.0f, false, false },
+        { "33_chase_decelerating",        CAM_CHASE,  -2.0f, 1, PI + 0.12f, 0.12f, 7.0f, false, false },
+        // Van Den Broeck pocket: there before departure, unlike the Alcubierre bubble
+        { "40_pocket_ship_waiting",          CAM_SHIP,  -4.0f, 0, -2.45f, 0.30f, 1.6f, false, true },
+        { "41_pocket_ship_looking_sideways", CAM_SHIP,  -4.0f, 0, -1.57f, 0.10f, 1.6f, false, true },
+        { "42_pocket_chase_parked",          CAM_CHASE, -4.0f, 0, PI + 0.9f, 0.25f, 5.0f, false, true },
+        { "43_pocket_chase_parked_glow",     CAM_CHASE, -4.0f, 0, PI + 0.9f, 0.25f, 5.0f, true,  true },
+        { "44_pocket_ship_cruise",           CAM_SHIP,  15.0f, 0, -2.45f, 0.30f, 1.6f, false, true },
+        { "45_pocket_chase_cruise_behind",   CAM_CHASE, 15.0f, 0, PI + 0.12f, 0.12f, 5.0f, false, true },
     };
     int n = (int)(sizeof shots / sizeof shots[0]), written = 0;
     if (!DirectoryExists(out_dir)) MakeDirectory(out_dir);
@@ -802,10 +898,12 @@ int game_render_reference_shots(Game* g, const char* out_dir) {
         if (s->anchor == 3) anchorT = t_arrive(g) + Vector3Distance(g->obsPos, (Vector3){ PATH_LEN, 0, 0 });
         g->t = anchorT + s->t;
         g->glow = s->glow;
+        g->pocket = s->pocket;
         char path[512];
         snprintf(path, sizeof path, "%s/%s.png", out_dir, s->name);
         if (export_view(g, path)) written++;
     }
+    g->pocket = false;
     return written;
 }
 
