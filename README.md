@@ -52,7 +52,7 @@ that's used instead, so editing a shader and pressing F5 works while developing.
 | P or F12 | screenshot without the HUD, saved to `screenshots/` (browser: P, downloaded) |
 | H | hide HUD |
 | I | info box: explains the current camera and what you're seeing at this moment |
-| F1 or ? | help |
+| F1 or ? | show / hide the controls (shown by default) |
 | F2 or R | render scale |
 | F5, F11 | reload shaders (not in the browser), fullscreen |
 

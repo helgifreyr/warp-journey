@@ -277,7 +277,7 @@ Game* game_create(const char* shader_dir) {
     g->hud = true;
     g->info = true;
     g->exposure = 1.0f;
-    g->helpTimer = 12.0f;
+    g->help = true;   // controls stay on screen until F1 / ? hides them
     g->mouseCaptured = true;
 #if defined(PLATFORM_WEB)
     g->scaleIdx = 2;   // 50%: browsers and laptop GPUs are slower, F2 to change
@@ -640,7 +640,10 @@ static void draw_info(const Game* g) {
     int bh = th + 6 + wrap_text(body, 0, 0, bw - 2 * pad, fs, lh, WHITE, false) + 2 * pad;
     int bx = sw - bw - 10, by = (int)timeline_rect().y - 62 - bh;
     if (by < 10) by = 10;
-    if ((g->help || g->helpTimer > 0) && by < 400) return;   // would collide with the help panel
+    if (g->help && by < 400) {        // would cover the help panel: use the left side instead
+        bx = 10;
+        if (by < 150) return;         // window too small for both: help wins
+    }
     DrawRectangle(bx, by, bw, bh, Fade(BLACK, 0.6f));
     DrawRectangle(bx, by, 3, bh, (Color){ 140, 210, 255, 255 });
     wrap_text(title, bx + pad, by + pad, bw - 2 * pad, 17, 21, (Color){ 140, 210, 255, 255 }, true);
@@ -684,7 +687,7 @@ static void draw_hud(Game* g) {
     }
     DrawText(TextFormat("cruise %.2f c   bubble R %.1f   wall sharpness %.1f   %d fps",
              g->vMax, g->R, g->sigma, GetFPS()), 22, 108, 14, GRAY);
-    DrawText("F1 or ? help", 22, 126, 12, DARKGRAY);
+    DrawText(g->help ? "F1 or ? hides the controls" : "F1 or ? shows the controls", 22, 126, 12, DARKGRAY);
 
     if (g->help || g->helpTimer > 0) {
         static const char* lines[] = {
