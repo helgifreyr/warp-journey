@@ -165,7 +165,10 @@ shots are timed relative to when each event's light reaches that observer.
 
 The light-ray physics that doesn't depend on the spacetime (autodiff, Hamiltonian,
 camera rays, RK45) is the [geodesic-gl](https://github.com/helgifreyr/geodesic-gl)
-library, a git submodule in `external/geodesic-gl`. This project adds the metric,
+library, a git submodule in `external/geodesic-gl`. Its method (Hamiltonian
+geodesics with the metric differentiated by dual-number autodiff) comes from
+FANTASY: P. Christian and C.-k. Chan, ApJ 909, 67 (2021),
+[arXiv:2010.02237](https://arxiv.org/abs/2010.02237). This project adds the metric,
 the scene and the app around it. The app harness (Makefile layout, vendored raylib,
 `#include` resolver for GLSL) comes from an earlier black-hole raytracer.
 
