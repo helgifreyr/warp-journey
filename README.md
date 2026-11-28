@@ -181,7 +181,7 @@ the scene and the app around it. The app harness (Makefile layout, vendored rayl
 | `src/gpu/warp_renderer.c` | draws one fullscreen quad with that fragment shader into a render texture; shaders loaded from disk or embedded; `#version 330` on desktop, `#version 300 es` in the browser |
 | `web/shell.html` | the browser page around the WebGL2 canvas |
 | `src/game/game.c` | timeline, cameras, scene, HUD, `--shots`, `--frames` |
-| `tests/physics_test.c` | double-precision CPU reference (using the library's `c/dual.c`) with 14 pass/fail checks (5 for the pocket: B's shape, eq. 11 against the curvature, autodiff, light delay through the pocket = extra proper diameter, total internal reflection) |
+| `tests/physics_test.c` | double-precision CPU reference (using the library's `c/dual.h`) with 14 pass/fail checks (5 for the pocket: B's shape, eq. 11 against the curvature, autodiff, light delay through the pocket = extra proper diameter, total internal reflection) |
 
 Differences from the earlier black-hole raytracer, all found in feasibility testing:
 
@@ -204,3 +204,7 @@ F2 lowers the render scale.
 fetched and built by `make web-deps`. The same C and GLSL sources serve both builds.
 A native macOS build should also work (`make` with a raylib built for OpenGL 3.3),
 but hasn't been tried.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The geodesic-gl submodule is MIT as well.

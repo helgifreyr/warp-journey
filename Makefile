@@ -50,8 +50,8 @@ src/gpu/shaders_embedded.h: $(SHADERS) $(EMBED)
 src/gpu/warp_renderer.o: src/gpu/shaders_embedded.h
 
 # CPU double-precision check of the physics the shader implements
-$(TEST): tests/physics_test.c $(GEODESIC_GL)/c/dual.c $(GEODESIC_GL)/c/dual.h
-	$(CC) $(CFLAGS) -Wno-misleading-indentation tests/physics_test.c $(GEODESIC_GL)/c/dual.c -o $@ -lm
+$(TEST): tests/physics_test.c $(GEODESIC_GL)/c/dual.h
+	$(CC) $(CFLAGS) -Wno-misleading-indentation tests/physics_test.c -o $@ -lm
 
 test: $(TEST)
 	./$(TEST)
