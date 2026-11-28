@@ -30,7 +30,8 @@ float vNow;   // bubble speed at tNow (used by ship shading)
 
 #include "dual.glsl"
 #include "metric_alcubierre.glsl"
-#include "geodesic_rk45.glsl"
+#include "geodesic.glsl"          // from geodesic-gl
+#include "rk45.glsl"
 #include "scene.glsl"
 
 const float HORIZON_LOG = 12.0;

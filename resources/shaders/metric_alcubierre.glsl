@@ -34,10 +34,6 @@
 //                   int pocket, float pAlpha, pR (Rt), pD (Dt), pN (n).
 // ---------------------------------------------------------------------------
 
-Dual dual_tanh(Dual a) {
-    float t = tanh(clamp(a.f, -15.0, 15.0));
-    return Dual(t, a.s * (1.0 - t * t));
-}
 // smootherstep and its integral, as Dual polynomials (u in [0, 1])
 Dual ramp_S(Dual u) {   // 6u^5 - 15u^4 + 10u^3
     Dual u3 = dual_mul(dual_mul(u, u), u);

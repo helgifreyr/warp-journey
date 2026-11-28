@@ -42,11 +42,17 @@ static char* read_file(const char* path, size_t* len) {
 }
 
 // Disk first (so F5 hot reload works while editing), then the copy compiled into the exe.
+// The metric-agnostic geodesic code (dual.glsl, geodesic.glsl, rk45.glsl) comes from the
+// geodesic-gl library in external/geodesic-gl/glsl/.
+#define GEODESIC_GL_DIR "external/geodesic-gl/glsl/"
 static bool g_usedEmbedded = false;
 static char* read_shader(const char* dir, const char* name) {
     char path[512];
     snprintf(path, sizeof path, "%s%s", dir, name);
     char* s = read_file(path, NULL);
+    if (s) return s;
+    snprintf(path, sizeof path, "%s%s", GEODESIC_GL_DIR, name);
+    s = read_file(path, NULL);
     if (s) return s;
     for (int i = 0; i < EMBEDDED_SHADER_COUNT; i++) {
         if (strcmp(EMBEDDED_SHADERS[i].name, name) == 0) {

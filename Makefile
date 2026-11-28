@@ -26,7 +26,10 @@ TEST   = tests/physics_test$(EXE)
 SOURCES = main.c src/game/game.c src/gpu/warp_renderer.c
 OBJECTS = $(SOURCES:.c=.o)
 HEADERS = src/game/game.h src/gpu/warp_renderer.h
-SHADERS = $(wildcard resources/shaders/*.glsl) resources/shaders/warp.frag
+# the metric-agnostic geodesic code is the geodesic-gl library (git submodule)
+GEODESIC_GL = external/geodesic-gl
+SHADERS = $(wildcard resources/shaders/*.glsl) resources/shaders/warp.frag \
+          $(GEODESIC_GL)/glsl/dual.glsl $(GEODESIC_GL)/glsl/geodesic.glsl $(GEODESIC_GL)/glsl/rk45.glsl
 EMBED   = tools/embed_shaders$(EXE)
 
 all: $(TARGET)
@@ -47,8 +50,8 @@ src/gpu/shaders_embedded.h: $(SHADERS) $(EMBED)
 src/gpu/warp_renderer.o: src/gpu/shaders_embedded.h
 
 # CPU double-precision check of the physics the shader implements
-$(TEST): tests/physics_test.c src/physics/dual.c src/physics/dual.h
-	$(CC) $(CFLAGS) -Wno-misleading-indentation tests/physics_test.c src/physics/dual.c -o $@ -lm
+$(TEST): tests/physics_test.c $(GEODESIC_GL)/c/dual.c $(GEODESIC_GL)/c/dual.h
+	$(CC) $(CFLAGS) -Wno-misleading-indentation tests/physics_test.c $(GEODESIC_GL)/c/dual.c -o $@ -lm
 
 test: $(TEST)
 	./$(TEST)

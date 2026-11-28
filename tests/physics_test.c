@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-#include "../src/physics/dual.h"
+#include "../external/geodesic-gl/c/dual.h"
 
 // journey = 0: constant-speed bubble at v.  journey = 1: the game's trip, with
 // speed profile v(t) peaking at vmax = v, exactly as in metric_alcubierre.glsl.
@@ -12,7 +12,6 @@
 typedef struct { double v, R, sigma; int journey; double tA, tB, tau;
                  int pocket; double alpha, Rt, Dt, n; } Params;
 
-static Dual dual_tanh(Dual a) { double t = tanh(a.f); return dual_create(t, a.s * (1.0 - t * t)); }
 static Dual shape(Dual r, const Params* P) {
     double n = 2.0 * tanh(P->sigma * P->R);
     Dual a = dual_tanh(dual_mul_scalar(dual_add_scalar(r,  P->R), P->sigma));

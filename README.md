@@ -17,6 +17,7 @@ to capture the mouse. It starts at 50% render scale; F2 or R changes it. On a Ma
 and R for render scale, since the F-keys control brightness and volume there.
 
 ```
+git submodule update --init  # once after cloning: fetches the geodesic-gl library
 make                         # build warp.exe
 make run                     # play
 make shots                   # render the labelled reference set to screenshots/reference/
@@ -162,21 +163,24 @@ shots are timed relative to when each event's light reaches that observer.
 
 ## How it works (for programmers)
 
-Built on the harness from `../raylib_raytrace_blackhole`: the same Makefile layout,
-vendored raylib, `#include` resolver for GLSL and `dual.glsl` autodiff.
+The light-ray physics that doesn't depend on the spacetime (autodiff, Hamiltonian,
+camera rays, RK45) is the [geodesic-gl](https://github.com/helgifreyr/geodesic-gl)
+library, a git submodule in `external/geodesic-gl`. This project adds the metric,
+the scene and the app around it. The app harness (Makefile layout, vendored raylib,
+`#include` resolver for GLSL) comes from an earlier black-hole raytracer.
 
 | File | Role |
 |---|---|
 | `resources/shaders/metric_alcubierre.glsl` | **the only metric-specific code**: inverse metric g^μν, with the trajectory X(t), v(t) written as Dual functions, so ∂H/∂t through the acceleration is exact |
-| `resources/shaders/geodesic_rk45.glsl` | metric-agnostic: Hamiltonian H = ½g^μν p_μ p_ν, autodiff ∂H/∂q, Eulerian-observer camera rays from a general 3+1 split, Dormand–Prince RK45 |
+| `external/geodesic-gl/glsl/` | the library: `dual.glsl` autodiff; `geodesic.glsl` Hamiltonian H = ½g^μν p_μ p_ν, autodiff ∂H/∂q, Eulerian-observer camera rays from a general 3+1 split; `rk45.glsl` Dormand–Prince RK45. The renderer looks there for any `#include` not in `resources/shaders/` |
 | `resources/shaders/scene.glsl` | procedural sky, planets, rings, ship (art only) |
 | `resources/shaders/warp.frag` | per-pixel driver: integrate while inside the capsule the bubble ever occupies, test hits per step, Doppler, tonemap |
 | `src/gpu/warp_renderer.c` | draws one fullscreen quad with that fragment shader into a render texture; shaders loaded from disk or embedded; `#version 330` on desktop, `#version 300 es` in the browser |
 | `web/shell.html` | the browser page around the WebGL2 canvas |
 | `src/game/game.c` | timeline, cameras, scene, HUD, `--shots`, `--frames` |
-| `tests/physics_test.c` | double-precision CPU reference with 14 pass/fail checks (5 for the pocket: B's shape, eq. 11 against the curvature, autodiff, light delay through the pocket = extra proper diameter, total internal reflection) |
+| `tests/physics_test.c` | double-precision CPU reference (using the library's `c/dual.c`) with 14 pass/fail checks (5 for the pocket: B's shape, eq. 11 against the curvature, autodiff, light delay through the pocket = extra proper diameter, total internal reflection) |
 
-Differences from the black-hole project, all found in feasibility testing:
+Differences from the earlier black-hole raytracer, all found in feasibility testing:
 
 1. **RK45 instead of the Tao symplectic integrator.** Tao's doubled phase space
    breaks down once the shift is superluminal.
@@ -184,7 +188,7 @@ Differences from the black-hole project, all found in feasibility testing:
    hundreds of e-folds. The accumulated log-scale gives the Doppler factor, and
    |log| > 12 is treated as a horizon.
 3. **A fragment shader, not a compute shader.** It started as a GL 4.3 compute
-   shader like the black-hole project. macOS stops at OpenGL 4.1 and WebGL2
+   shader like the black-hole raytracer. macOS stops at OpenGL 4.1 and WebGL2
    has no compute shaders, so it now draws one fullscreen quad instead. The
    planets moved from a storage buffer to a uniform array. Output matches the
    compute version to within float rounding (12 of the 19 reference shots are
